@@ -1,0 +1,93 @@
+from typing import Dict, Optional
+from pydantic import BaseModel, Field
+
+from backend.app.models.marketing_strategy import MarketingStrategy
+
+
+class StartRequest(BaseModel):
+    """
+    Request payload to start a new marketing strategy conversation.
+    """
+    message: str = Field(
+        ...,
+        min_length=1,
+        description="The initial user message describing their business, product/service, goal, and target audience."
+    )
+
+
+class StartResponse(BaseModel):
+    """
+    Response returned when starting a new conversation or pausing for the first question.
+    """
+    thread_id: str = Field(
+        ...,
+        description="Unique thread identifier for tracking this conversation session."
+    )
+    status: str = Field(
+        ...,
+        description="Status of the graph workflow ('waiting_for_reply' or 'completed')."
+    )
+    question: Optional[str] = Field(
+        default=None,
+        description="The clarifying question to ask the user if waiting for a reply."
+    )
+    requirement_id: Optional[str] = Field(
+        default=None,
+        description="The requirement ID associated with the clarifying question."
+    )
+
+
+class ReplyRequest(BaseModel):
+    """
+    Request payload to submit a user answer and continue an existing conversation.
+    """
+    thread_id: str = Field(
+        ...,
+        min_length=1,
+        description="The active conversation thread identifier."
+    )
+    message: str = Field(
+        ...,
+        min_length=1,
+        description="The user's answer to the active clarifying question."
+    )
+
+
+class ReplyResponse(BaseModel):
+    """
+    Response returned after submitting a reply and advancing the graph.
+    """
+    thread_id: str = Field(
+        ...,
+        description="The active conversation thread identifier."
+    )
+    status: str = Field(
+        ...,
+        description="Status of the graph workflow ('waiting_for_reply' or 'completed')."
+    )
+    question: Optional[str] = Field(
+        default=None,
+        description="The next clarifying question if waiting for another reply."
+    )
+    requirement_id: Optional[str] = Field(
+        default=None,
+        description="The requirement ID associated with the next clarifying question."
+    )
+
+
+class StrategyResponse(BaseModel):
+    """
+    Response payload containing the final generated marketing strategy.
+    """
+    thread_id: str = Field(
+        ...,
+        description="The active conversation thread identifier."
+    )
+    status: str = Field(
+        default="completed",
+        description="Status indicating strategy generation is complete."
+    )
+    strategy: MarketingStrategy = Field(
+        ...,
+        description="The complete structured MarketingStrategy object."
+    )
