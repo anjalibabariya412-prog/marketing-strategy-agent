@@ -9,10 +9,13 @@ class Settings(BaseSettings):
 
     # Groq LLM settings
     groq_api_key: str
-    groq_model: str = "openai/gpt-oss-120b"  # default if not set in .env
+    groq_model: str = "openai/gpt-oss-20b"  # default if not set in .env
 
     # Maximum clarifying questions limit before forcing strategy generation
-    max_questions: int = 6
+    max_questions: int = 7
+
+    # Postgres Database settings
+    database_url: str = "postgresql://postgres:postgres@localhost:5432/marketing_agent_db"
 
     # This tells Pydantic Settings where to find the .env file
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

@@ -58,8 +58,9 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
         id="budget_resources",
         title="Budget / Resources",
         description=(
-            "The financial, time, or team resources available for marketing execution. Crucial "
-            "for defining realistic, actionable, and scalable strategic recommendations."
+            "The money/resources available to the business for marketing activities "
+            "such as advertising, content, influencers, campaigns, etc. "
+            "Note: This is strictly internal marketing spend budget, NOT the customer-facing product price or fee ('pricing_model')."
         ),
         is_must_have=True,
         status=RequirementStatus.UNKNOWN,
@@ -70,8 +71,9 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
         id="pricing_model",
         title="Pricing Model",
         description=(
-            "The structure of how customers pay (e.g., one-time, subscription, tiered, "
-            "usage-based, or donation), shaping market positioning, offer structure, and messaging."
+            "The price and payment structure of the product or service being sold to customers. "
+            "Examples: product price, service fee, monthly subscription, yearly subscription, one-time payment, packages, etc. "
+            "Note: This refers to what customers pay for the product/service, NOT the money available for marketing activities ('budget_resources')."
         ),
         is_must_have=True,
         status=RequirementStatus.UNKNOWN,

@@ -3,92 +3,107 @@ import './App.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
+const STANDARD_SECTIONS = [
+  { key: 'business_overview', label: 'Business Overview' },
+  { key: 'target_audience_insights', label: 'Target Audience & Customer Insights' },
+  { key: 'competitive_positioning', label: 'Competitive Positioning' },
+  { key: 'value_proposition', label: 'Value Proposition' },
+  { key: 'marketing_channels_and_tactics', label: 'Marketing Channels & Tactics' },
+  { key: 'customer_acquisition_approach', label: 'Customer Acquisition Approach' },
+  { key: 'budget_considerations', label: 'Budget Considerations' },
+  { key: 'kpis', label: 'KPIs / Success Metrics' },
+  { key: 'action_plan', label: 'Action Plan' },
+];
+
 function App() {
-  const [initialMessage, setInitialMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const [threadId, setThreadId] = useState(null);
   const [status, setStatus] = useState(null);
   const [requirementId, setRequirementId] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([
+    {
+      sender: 'agent',
+      text: "Hi! I'm your Marketing Strategy Agent 👋\nI'll help you create a marketing strategy tailored to your business.\nTo get started, could you tell me a little about your business, which product or service you'd like to market, what you want to achieve through marketing, and who you want to reach?",
+    },
+  ]);
   const [replyInput, setReplyInput] = useState('');
   const [isCompleted, setIsCompleted] = useState(false);
 
+  // Strategy fetch state
+  const [strategy, setStrategy] = useState(null);
+  const [loadingStrategy, setLoadingStrategy] = useState(false);
+  const [strategyError, setStrategyError] = useState(null);
+
   const messagesEndRef = useRef(null);
+  const replyTextareaRef = useRef(null);
 
   // Auto-scroll chat to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  const handleStart = async () => {
-    if (!initialMessage.trim()) {
-      setError('Please enter a description of your business to get started.');
-      return;
+  // Dynamic vertical auto-expand for multiline reply textarea
+  useEffect(() => {
+    if (replyTextareaRef.current) {
+      replyTextareaRef.current.style.height = 'auto';
+      const scrollHeight = replyTextareaRef.current.scrollHeight;
+      replyTextareaRef.current.style.height = `${Math.min(Math.max(scrollHeight, 80), 200)}px`;
     }
+  }, [replyInput]);
 
-    setLoading(true);
-    setError(null);
+  // Fetch strategy automatically when conversation completes
+  useEffect(() => {
+    if (isCompleted && threadId) {
+      fetchStrategy();
+    }
+  }, [isCompleted, threadId]);
+
+  const fetchStrategy = async () => {
+    setLoadingStrategy(true);
+    setStrategyError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: initialMessage.trim() }),
-      });
-
+      const response = await fetch(`${API_BASE_URL}/strategy?thread_id=${encodeURIComponent(threadId)}`);
       if (!response.ok) {
         throw new Error(`Server returned status ${response.status}`);
       }
 
       const data = await response.json();
-      setThreadId(data.thread_id);
-      setStatus(data.status);
-      setRequirementId(data.requirement_id);
-
-      if (data.status === 'completed') {
-        setIsCompleted(true);
-        setMessages([
-          { sender: 'agent', text: 'Great, I have enough information! Generating your strategy...' }
-        ]);
-      } else if (data.question) {
-        setMessages([
-          { sender: 'agent', text: data.question }
-        ]);
-      }
+      setStrategy(data.strategy);
     } catch (err) {
-      console.error('Failed to start conversation:', err);
-      setError(err.message || 'Failed to start conversation. Please check connection and try again.');
+      console.error('Failed to fetch strategy:', err);
+      setStrategyError(err.message || 'Failed to load strategy. Please try again.');
     } finally {
-      setLoading(false);
+      setLoadingStrategy(false);
     }
   };
 
-  const handleReply = async (e) => {
+  const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
-    if (!replyInput.trim() || !threadId || loading) return;
+    if (!replyInput.trim() || loading) return;
 
     const userText = replyInput.trim();
     setReplyInput('');
     setError(null);
 
-    // Append user message immediately to chat history
     setMessages((prev) => [...prev, { sender: 'user', text: userText }]);
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/reply`, {
+      const isFirstMessage = !threadId;
+      const endpoint = isFirstMessage ? `${API_BASE_URL}/start` : `${API_BASE_URL}/reply`;
+      const payload = isFirstMessage
+        ? { message: userText }
+        : { thread_id: threadId, message: userText };
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          thread_id: threadId,
-          message: userText,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -96,15 +111,23 @@ function App() {
       }
 
       const data = await response.json();
+      if (data.thread_id) {
+        setThreadId(data.thread_id);
+      }
       setStatus(data.status);
       setRequirementId(data.requirement_id);
 
       if (data.status === 'completed') {
-        setIsCompleted(true);
         setMessages((prev) => [
           ...prev,
-          { sender: 'agent', text: 'Great, I have enough information! Generating your strategy...' }
+          {
+            sender: 'agent',
+            text: "Great, I have everything I need! ✨ Generating your personalized marketing strategy...",
+          },
         ]);
+        setTimeout(() => {
+          setIsCompleted(true);
+        }, 6000);
       } else if (data.question) {
         setMessages((prev) => [
           ...prev,
@@ -112,106 +135,56 @@ function App() {
         ]);
       }
     } catch (err) {
-      console.error('Failed to send reply:', err);
-      setError(err.message || 'Failed to send reply. Please try again.');
+      console.error('Failed to send message:', err);
+      setError(err.message || 'Failed to send message. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleKeyDown = (e) => {
+    // Enter sends the message, while Shift+Enter creates a new line
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!loading && replyInput.trim()) {
+        handleSendMessage();
+      }
+    }
+  };
+
   return (
-    <div style={{ maxWidth: '750px', margin: '30px auto', padding: '20px', fontFamily: 'system-ui, sans-serif' }}>
-      <h1>Marketing Strategy Agent</h1>
+    <div className="app-container">
+      <header className="app-header">
+        <h1 className="app-title">Marketing Strategy Agent</h1>
+        <p className="app-subtitle">AI-driven marketing strategy consultant for your business</p>
+      </header>
 
-      {!threadId ? (
-        /* Start Screen */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <label htmlFor="initial-message" style={{ fontWeight: 'bold' }}>
-            Tell us about your business:
-          </label>
-          <textarea
-            id="initial-message"
-            rows={6}
-            value={initialMessage}
-            onChange={(e) => setInitialMessage(e.target.value)}
-            placeholder="Describe your business, what you offer, your marketing goal, and who you're trying to reach..."
-            style={{ width: '100%', padding: '12px', fontSize: '15px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box' }}
-            disabled={loading}
-          />
-          <button
-            onClick={handleStart}
-            disabled={loading}
-            style={{
-              padding: '12px 24px',
-              fontSize: '16px',
-              fontWeight: 'bold',
-              color: '#fff',
-              backgroundColor: loading ? '#888' : '#0066cc',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              alignSelf: 'flex-start'
-            }}
-          >
-            {loading ? 'Starting Conversation...' : 'Start'}
-          </button>
-          {error && (
-            <div style={{ padding: '12px', color: '#d9534f', backgroundColor: '#fdf7f7', border: '1px solid #d9534f', borderRadius: '6px' }}>
-              {error}
-            </div>
-          )}
-        </div>
-      ) : (
-        /* Full Chat Interface */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Header Bar */}
-          <div style={{ padding: '12px 16px', backgroundColor: '#eef2f7', borderRadius: '6px', fontSize: '14px', color: '#333' }}>
-            <strong>Session Thread ID:</strong> <code>{threadId}</code>
-            {requirementId && (
-              <span style={{ marginLeft: '16px' }}>
-                <strong>Active Requirement:</strong> <code>{requirementId}</code>
-              </span>
-            )}
-            <span style={{ marginLeft: '16px' }}>
-              <strong>Status:</strong> <code>{status}</code>
-            </span>
-          </div>
-
-          {/* Messages Scrolling Area */}
-          <div style={{
-            height: '400px',
-            overflowY: 'auto',
-            padding: '16px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            backgroundColor: '#fafafa',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px'
-          }}>
+      {!isCompleted ? (
+        /* Full Chat Interface Card */
+        <div className="card">
+          {/* Messages Scroll Area */}
+          <div className="chat-scroll-area">
             {messages.map((msg, index) => (
-              <div
-                key={index}
-                style={{
-                  alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
-                  maxWidth: '80%',
-                  padding: '12px 16px',
-                  borderRadius: '12px',
-                  backgroundColor: msg.sender === 'user' ? '#0066cc' : '#e6e6e6',
-                  color: msg.sender === 'user' ? '#ffffff' : '#111111',
-                  lineHeight: '1.4'
-                }}
-              >
-                <div style={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '4px', opacity: 0.8 }}>
+              <div key={index} className={`message-wrapper ${msg.sender}`}>
+                <div className="message-label">
                   {msg.sender === 'user' ? 'You' : 'Agent'}
                 </div>
-                <div>{msg.text}</div>
+                <div className="message-bubble">
+                  {msg.text}
+                </div>
               </div>
             ))}
 
             {loading && (
-              <div style={{ alignSelf: 'flex-start', padding: '10px 16px', borderRadius: '12px', backgroundColor: '#eee', color: '#666', fontStyle: 'italic' }}>
-                Agent is thinking...
+              <div className="message-wrapper agent">
+                <div className="message-label">Agent</div>
+                <div className="message-bubble typing-indicator-bubble">
+                  <div className="typing-dots">
+                    <span className="dot" />
+                    <span className="dot" />
+                    <span className="dot" />
+                  </div>
+                </div>
               </div>
             )}
 
@@ -219,45 +192,97 @@ function App() {
           </div>
 
           {/* Error Banner */}
-          {error && (
-            <div style={{ padding: '10px 14px', color: '#d9534f', backgroundColor: '#fdf7f7', border: '1px solid #d9534f', borderRadius: '6px', fontSize: '14px' }}>
-              {error}
-            </div>
-          )}
+          {error && <div className="error-banner" style={{ marginTop: '14px' }}>{error}</div>}
 
-          {/* Chat Input Form / Completion Screen Placeholder */}
-          {!isCompleted ? (
-            <form onSubmit={handleReply} style={{ display: 'flex', gap: '10px' }}>
-              <input
-                type="text"
+          {/* Multiline Chat Input Form */}
+          <form onSubmit={handleSendMessage} className="chat-input-form">
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <textarea
+                ref={replyTextareaRef}
+                className="chat-input-textarea"
                 value={replyInput}
                 onChange={(e) => setReplyInput(e.target.value)}
-                placeholder="Type your answer..."
+                onKeyDown={handleKeyDown}
+                placeholder="Type your message... (Press Enter to send, Shift+Enter for new line)"
                 disabled={loading}
-                style={{ flex: 1, padding: '12px', fontSize: '15px', borderRadius: '6px', border: '1px solid #ccc' }}
+                rows={3}
               />
-              <button
-                type="submit"
-                disabled={loading || !replyInput.trim()}
-                style={{
-                  padding: '12px 24px',
-                  fontSize: '15px',
-                  fontWeight: 'bold',
-                  color: '#fff',
-                  backgroundColor: loading || !replyInput.trim() ? '#888' : '#0066cc',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: loading || !replyInput.trim() ? 'not-allowed' : 'pointer'
-                }}
-              >
-                Send
-              </button>
-            </form>
-          ) : (
-            <div style={{ padding: '16px', backgroundColor: '#d4edda', border: '1px solid #c3e6cb', color: '#155724', borderRadius: '6px', textAlign: 'center', fontWeight: 'bold' }}>
-              🎉 Strategy Generation Complete (Strategy Display Component will be added in Task 9.4)
+              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', textAlign: 'right' }}>
+                Press <kbd style={{ fontFamily: 'sans-serif', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '3px', border: '1px solid #cbd5e1' }}>Enter</kbd> to send, <kbd style={{ fontFamily: 'sans-serif', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '3px', border: '1px solid #cbd5e1' }}>Shift</kbd> + <kbd style={{ fontFamily: 'sans-serif', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '3px', border: '1px solid #cbd5e1' }}>Enter</kbd> for new line
+              </div>
             </div>
-          )}
+            <button
+              type="submit"
+              className="btn-send"
+              disabled={loading || !replyInput.trim()}
+            >
+              Send
+            </button>
+          </form>
+        </div>
+      ) : (
+        /* Task 9.4 Strategy Display Screen Card */
+        <div>
+          {loadingStrategy ? (
+            <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
+              <h2>Generating Your Customized Marketing Strategy...</h2>
+              <p style={{ color: '#64748b' }}>Synthesizing your business context and facts into actionable recommendations.</p>
+              <div className="thinking-dots" style={{ fontSize: '24px', color: '#2563eb', marginTop: '16px' }}>
+                <span>.</span><span>.</span><span>.</span>
+              </div>
+            </div>
+          ) : strategyError ? (
+            <div className="card">
+              <div className="error-banner">
+                <h3 style={{ margin: '0 0 6px 0' }}>Failed to Load Marketing Strategy</h3>
+                <p style={{ margin: 0 }}>{strategyError}</p>
+              </div>
+              <button
+                onClick={fetchStrategy}
+                className="btn-primary"
+                style={{ marginTop: '16px' }}
+              >
+                Retry Loading Strategy
+              </button>
+            </div>
+          ) : strategy ? (
+            <div className="strategy-card">
+              <div className="strategy-header">
+                <h2 className="strategy-title">Your Marketing Strategy</h2>
+              </div>
+
+              {/* Render 9 Standard Strategy Sections (Skipping null/empty fields) */}
+              {STANDARD_SECTIONS.map(({ key, label }) => {
+                const val = strategy[key];
+                if (!val || typeof val !== 'string' || !val.trim()) {
+                  return null;
+                }
+
+                return (
+                  <section key={key} className="strategy-section">
+                    <h3 className="section-title">{label}</h3>
+                    <p className="section-content">{val.trim()}</p>
+                  </section>
+                );
+              })}
+
+              {/* Render Additional Custom Sections (Skipping null/empty values) */}
+              {strategy.additional_sections &&
+                typeof strategy.additional_sections === 'object' &&
+                Object.entries(strategy.additional_sections).map(([title, content]) => {
+                  if (!content || typeof content !== 'string' || !content.trim()) {
+                    return null;
+                  }
+
+                  return (
+                    <section key={title} className="strategy-section">
+                      <h3 className="section-title">{title}</h3>
+                      <p className="section-content">{content.trim()}</p>
+                    </section>
+                  );
+                })}
+            </div>
+          ) : null}
         </div>
       )}
     </div>

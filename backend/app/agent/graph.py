@@ -1,8 +1,10 @@
 import logging
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg_pool import ConnectionPool
 from langgraph.types import interrupt
 
+from backend.app.core.config import settings
 from backend.app.models.agent_state import MarketingAgentState
 from backend.app.agent.gap_analysis import analyze_relevance
 from backend.app.agent.question_selection import prepare_next_question
@@ -43,10 +45,24 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
     Graph Node: Generates question if needed, pauses for user answer via interrupt(),
     and processes the user's answer via process_answer_for_requirement upon resumption.
     """
+    logger.info(
+        f"Graph Node [ask] ENTRY | thread_id: '{state.thread_id}' | "
+        f"active_req: '{state.active_requirement_id}' | current_question: '{state.current_question}'"
+    )
+
     # 1. Prepare next question ONLY if one is not already pending (e.g. first time, not resume)
     if not state.current_question or not state.active_requirement_id:
-        logger.info("Graph Node [ask]: Preparing next question")
+        logger.info("Graph Node [ask]: Preparing next question (prepare_next_question CALLED)")
         prepare_next_question(state)
+        logger.info(
+            f"Graph Node [ask]: After prepare_next_question -> active_req: '{state.active_requirement_id}', "
+            f"question: '{state.current_question}'"
+        )
+    else:
+        logger.info(
+            f"Graph Node [ask]: Skipping prepare_next_question() because question already pending -> "
+            f"active_req: '{state.active_requirement_id}'"
+        )
 
     if not state.current_question:
         logger.warning("Graph Node [ask]: No current question generated.")
@@ -60,7 +76,7 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
     })
 
     # 3. Resumed: Process the user answer using LLM classification and state update
-    logger.info(f"Graph Node [ask]: Resumed with user answer: '{user_answer}'")
+    logger.info(f"Graph Node [ask]: Resumed with user answer: '{user_answer}' on active_req: '{state.active_requirement_id}'")
     if user_answer:
         process_answer_for_requirement(state, str(user_answer))
 
@@ -104,8 +120,14 @@ builder.add_conditional_edges(
 builder.add_edge("ask", "analyze")
 builder.add_edge("generate", END)
 
-# In-memory checkpointer for session state persistence across interrupts
-memory = MemorySaver()
+# Postgres checkpointer for persistent session state across interrupts and server restarts
+pool = ConnectionPool(
+    conninfo=settings.database_url,
+    max_size=20,
+    kwargs={"autocommit": True, "prepare_threshold": 0},
+)
+checkpointer = PostgresSaver(pool)
+checkpointer.setup()
 
-# Compile graph with MemorySaver checkpointer
-graph = builder.compile(checkpointer=memory)
+# Compile graph with PostgresSaver checkpointer
+graph = builder.compile(checkpointer=checkpointer)

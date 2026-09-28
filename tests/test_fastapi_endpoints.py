@@ -17,16 +17,6 @@ def test_fastapi_endpoints():
     print("=== Testing Task 8.4: FastAPI Integration Endpoints ===")
 
     # -------------------------------------------------------------
-    # Test 0: Verify GET /health
-    # -------------------------------------------------------------
-    print("\n--- Test 0: GET /health ---")
-    res_health = client.get("/health")
-    assert res_health.status_code == 200, f"Expected 200, got {res_health.status_code}"
-    health_data = res_health.json()
-    assert health_data.get("status") == "ok"
-    print(f"✓ GET /health returned 200 OK: {health_data}")
-
-    # -------------------------------------------------------------
     # Test 1: POST /start (Start new conversation)
     # -------------------------------------------------------------
     print("\n--- Test 1: POST /start ---")

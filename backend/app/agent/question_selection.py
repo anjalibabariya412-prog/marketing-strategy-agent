@@ -13,8 +13,9 @@ SYSTEM_PROMPT = (
     "Your goal is to evaluate the list of candidate missing requirements against the known business context and pick the SINGLE most strategic requirement to ask about next.\n\n"
     "Prioritization rules:\n"
     "1. Must-have requirements (Must Have: Yes) should generally be prioritized over optional ones.\n"
-    "2. However, do NOT simply pick the first must-have item blindly. Reason about which specific must-have requirement provides the highest immediate value or clarity for THIS specific business and its current context.\n"
-    "3. Occasionally, a non-must-have requirement (Must Have: No) may be unusually urgent or foundational for a particular business situation. You may pick a non-must-have item if you clearly reason why it is more critical right now than the remaining must-haves.\n\n"
+    "2. High Priority for Marketing Budget: If 'budget_resources' is still UNKNOWN (present in candidate list), prioritize it over optional and lower-priority requirements so that marketing budget is collected before reaching question limits.\n"
+    "3. However, do NOT simply pick the first must-have item blindly. Reason about which specific requirement provides the highest immediate value or clarity for THIS specific business and its current context.\n"
+    "4. Occasionally, a non-must-have requirement (Must Have: No) may be unusually urgent or foundational for a particular business situation. You may pick a non-must-have item if you clearly reason why it is more critical right now than the remaining must-haves.\n\n"
     "You MUST respond ONLY with a JSON object in this exact shape:\n"
     "{\n"
     '  "selected_id": "<requirement_id>",\n'
@@ -26,8 +27,11 @@ SYSTEM_PROMPT = (
 
 def _get_default_fallback(candidates: List[InformationRequirement]) -> InformationRequirement:
     """
-    Returns the first must-have candidate if available, otherwise the first candidate in the list.
+    Returns budget_resources if available in candidates, otherwise the first must-have candidate if available, otherwise the first candidate in the list.
     """
+    for req in candidates:
+        if req.id == "budget_resources":
+            return req
     for req in candidates:
         if req.is_must_have:
             return req
@@ -120,21 +124,43 @@ def select_next_requirement(state: MarketingAgentState) -> Optional[InformationR
 
 
 QUESTION_GEN_SYSTEM_PROMPT = (
-    "You are a friendly, expert marketing strategy consultant speaking directly to a business owner.\n"
-    "Your goal is to ask ONE clear, natural, conversational question to gather a specific piece of marketing information.\n\n"
-    "Guidelines:\n"
-    "1. Sound natural, warm, and conversational — NOT like a robotic form field label or survey question.\n"
-    "2. Weave in specific details from the known business context (such as their company name, product, goal, or target audience) to make the question feel personalized and attentive.\n"
-    "3. Focus on ONLY ONE specific information requirement at a time. Do not ask multiple unrelated questions.\n"
-    "4. Return ONLY the question text itself. Do NOT surround it with quotation marks, preamble, or commentary."
+    "You are a friendly, experienced human marketing consultant having a warm, direct conversation with a business owner.\n"
+    "Your goal is to ask ONE short, simple, direct question to collect a specific piece of missing information.\n\n"
+    "CRITICAL RULES FOR QUESTION PHRASING:\n"
+    "1. CONCEPT TRANSLATION: The requirement title/ID is an internal system concept. Do NOT blindly convert or mechanically copy the requirement title verbatim into a question. Ask about the underlying practical information needed.\n"
+    "2. BUSINESS CONTEXT & TYPE ADAPTATION: Adapt your language, terminology, and phrasing naturally to match the SPECIFIC business type, product/service, and business model described in the context — do not assume or default to any particular category (subscription, retail, service, etc.). Infer what payment/pricing/operational terminology is natural for THIS business from the context actually provided, rather than mapping it to a fixed set of business categories.\n"
+    "3. GROUNDED IN CONTEXT (NO UNFOUNDED ASSUMPTIONS): Stay strictly grounded in the conversation context. Do NOT introduce ungrounded assumptions or specific customer journey stages (e.g., 'before they hire you', 'before purchasing', 'during onboarding', 'after buying') unless explicitly mentioned in the context.\n"
+    "   - For 'customer_pain_points': ask broadly about the core problems, challenges, frustrations, or needs that the business or offering helps customers solve.\n"
+    "4. PREVIOUS QUESTIONS & AVOID REPETITION: Review the previous conversation Q&A history. Do NOT repeat questions, exact template phrases, or wordings that have already been asked or answered.\n"
+    "5. COMPETITOR AWARENESS: Never reference competitors if the user indicated there are no direct competitors or if 'competitors' status is UNAVAILABLE. For USP/Differentiation when no competitors exist, ask naturally about key software/offering features, unique capabilities, or main strengths.\n"
+    "6. CLARITY & ACCURACY OVER FORCED VARIATION: Prioritize clarity, naturalness, and business relevance. Ask only for the information needed by the selected requirement without inventing extra details.\n"
+    "7. CONCISE & DIRECT: Keep the question concise, normally under 20 words.. No formal preambles (e.g., 'Could you tell me...', 'Can you elaborate...'), no bulleted lists, and no raw system jargon.\n"
+    "8. OUTPUT FORMAT: Return ONLY the raw question text. No quotes, no markdown, no preamble."
 )
+
+FALLBACK_QUESTIONS = {
+    "customer_pain_points": "What is the main problem your customers are looking to solve?",
+    "competitors": "Which other brands do your customers usually compare you with?",
+    "usp_differentiation": "What are the main strengths or key features of your offering?",
+    "current_marketing_channels": "Where are you currently promoting your business?",
+    "budget_resources": "How much have you planned to spend on marketing?",
+    "pricing_model": "How do you structure your pricing or fees?",
+    "brand_tone": "How would you describe the tone of your brand?",
+    "sales_process": "How do customers usually buy from you?",
+    "purchase_frequency": "How often do your customers typically buy from you?",
+    "geography": "Where are your main customers located?",
+    "sales_cycle_length": "How long does it usually take a customer to decide to buy?",
+    "previous_marketing_results": "What marketing tactics have worked best for you so far?",
+    "seasonality": "Are there specific times of year when your sales peak?",
+    "customer_acquisition_method": "How do new customers currently find your business?",
+}
 
 
 def generate_question(state: MarketingAgentState, selected_requirement: InformationRequirement) -> str:
     """
     Generates a natural, context-aware conversational question for the selected information requirement.
 
-    Uses LLM to frame the question personalized to the business context.
+    Uses LLM to frame the question personalized to the business context and conversation history.
     Falls back gracefully to a simple template-based question if the LLM call fails.
     """
     ctx = state.business_context
@@ -145,29 +171,48 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
     ]
 
-    known_reqs = [
+    # Include resolved requirements status and values (both KNOWN and UNAVAILABLE)
+    resolved_reqs = [
         req for req in state.requirements 
-        if req.status == RequirementStatus.KNOWN and req.value is not None
+        if req.status != RequirementStatus.UNKNOWN
     ]
-    if known_reqs:
-        context_lines.append("\nALREADY KNOWN INFORMATION:")
-        for req in known_reqs:
-            context_lines.append(f"- {req.title}: {req.value}")
+    if resolved_reqs:
+        context_lines.append("\nRESOLVED REQUIREMENTS STATUS & VALUES:")
+        for req in resolved_reqs:
+            if req.status == RequirementStatus.KNOWN and req.value:
+                context_lines.append(f"- {req.title} ({req.id}): KNOWN -> {req.value}")
+            elif req.status == RequirementStatus.UNAVAILABLE:
+                context_lines.append(f"- {req.title} ({req.id}): UNAVAILABLE (No direct competitors / info unavailable / not applicable)")
+
+    # Include previous conversation Q&A history
+    if state.qa_history:
+        context_lines.append("\nPREVIOUS CONVERSATION Q&A HISTORY (do NOT repeat these questions or exact phrasing):")
+        for turn in state.qa_history:
+            context_lines.append(f"Q: \"{turn.question}\"")
+            context_lines.append(f"A: \"{turn.answer}\"")
 
     context_str = "\n".join(context_lines)
 
     user_prompt = (
-        f"BUSINESS CONTEXT:\n{context_str}\n\n"
+        f"BUSINESS CONTEXT & CONVERSATION HISTORY:\n{context_str}\n\n"
         f"INFORMATION TO COLLECT:\n"
-        f"- Title: {selected_requirement.title}\n"
+        f"- Requirement: {selected_requirement.title} ({selected_requirement.id})\n"
         f"- Description: {selected_requirement.description}\n\n"
-        "Phrase ONE natural, personalized conversational question to ask the client to collect this specific information."
+        f"INSTRUCTIONS:\n"
+        f"- Use natural wording appropriate for this business type ({ctx.product_or_service or 'business'}).\n"
+        f"- Stay grounded: do NOT invent ungrounded assumptions or journey stages (like 'before hiring you' or 'during checkout').\n"
+        f"- For customer_pain_points: ask broadly about the main problems, challenges, or needs their customers face that this business helps solve.\n"
+        f"- For pricing: ask using business-appropriate terms (e.g., subscription plans / pricing model for software/SaaS, service fees for services, price range for physical products).\n"
+        f"- For USP/differentiation: if competitors are marked unavailable or no competitors exist, ask about key features/strengths WITHOUT mentioning competitors.\n"
+        f"- Do NOT copy template questions verbatim; generate a fresh, contextually natural question.\n\n"
+        f"Write ONE short, natural, 1-sentence direct question to ask the owner of {ctx.company_name or 'this business'} to gather this information."
     )
 
     try:
         raw_response = get_llm_response(
             prompt=user_prompt,
-            system_prompt=QUESTION_GEN_SYSTEM_PROMPT
+            system_prompt=QUESTION_GEN_SYSTEM_PROMPT,
+            temperature=0.7
         )
 
         question = raw_response.strip().strip('"').strip("'").strip()
@@ -178,7 +223,10 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
     except (LLMServiceError, Exception) as e:
         logger.error(f"generate_question error: {e}. Falling back to template question.")
 
-    fallback_question = f"Could you tell me a bit about your {selected_requirement.title.lower()}?"
+    fallback_question = FALLBACK_QUESTIONS.get(
+        selected_requirement.id,
+        f"What details can you share about your {selected_requirement.title.lower()}?"
+    )
     logger.info(f"Fallback question used: {fallback_question}")
     return fallback_question
 
