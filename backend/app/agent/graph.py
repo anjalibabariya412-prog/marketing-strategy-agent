@@ -19,9 +19,14 @@ def analyze_node(state: MarketingAgentState) -> MarketingAgentState:
     """
     Graph Node: Executes relevance gap analysis against missing requirements,
     updating status to NOT_RELEVANT for inapplicable requirements.
+    Runs at most once per conversation session.
     """
-    logger.info("Graph Node [analyze]: Running analyze_relevance()")
-    analyze_relevance(state)
+    if not state.analysis_done:
+        logger.info("Graph Node [analyze]: Running analyze_relevance()")
+        analyze_relevance(state)
+        state.analysis_done = True
+    else:
+        logger.info("Graph Node [analyze]: Skipping analyze_relevance() because analysis_done is True")
     return state
 
 

@@ -28,15 +28,16 @@ function App() {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [startError, setStartError] = useState(null);
 
-  // Conversation State
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
+  // Question Wizard State
   const [threadId, setThreadId] = useState(null);
   const [status, setStatus] = useState(null);
   const [requirementId, setRequirementId] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [replyInput, setReplyInput] = useState('');
+  const [questionNumber, setQuestionNumber] = useState(1);
+  const [currentQuestion, setCurrentQuestion] = useState('');
+  const [answerInput, setAnswerInput] = useState('');
+  const [questionLoading, setQuestionLoading] = useState(false);
+  const [questionError, setQuestionError] = useState(null);
+  const [isTransitioningToStrategy, setIsTransitioningToStrategy] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
 
   // Strategy fetch state
@@ -44,24 +45,14 @@ function App() {
   const [loadingStrategy, setLoadingStrategy] = useState(false);
   const [strategyError, setStrategyError] = useState(null);
 
-  const messagesEndRef = useRef(null);
-  const replyTextareaRef = useRef(null);
+  const answerTextareaRef = useRef(null);
 
-  // Auto-scroll chat to bottom on new messages
+  // Auto-focus textarea whenever a new question appears or question card is active
   useEffect(() => {
-    if (threadId && !isCompleted) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (threadId && !isCompleted && !isTransitioningToStrategy) {
+      answerTextareaRef.current?.focus();
     }
-  }, [messages, loading, threadId, isCompleted]);
-
-  // Dynamic vertical auto-expand for multiline reply textarea
-  useEffect(() => {
-    if (replyTextareaRef.current) {
-      replyTextareaRef.current.style.height = 'auto';
-      const scrollHeight = replyTextareaRef.current.scrollHeight;
-      replyTextareaRef.current.style.height = `${Math.min(Math.max(scrollHeight, 80), 200)}px`;
-    }
-  }, [replyInput]);
+  }, [currentQuestion, threadId, isCompleted, isTransitioningToStrategy]);
 
   // Fetch strategy automatically when conversation completes
   useEffect(() => {
@@ -157,19 +148,14 @@ function App() {
       setRequirementId(data.requirement_id || null);
 
       if (data.status === 'completed') {
-        setMessages([
-          {
-            sender: 'agent',
-            text: "Great, I have everything I need! ✨ Generating your personalized marketing strategy...",
-          },
-        ]);
+        setIsTransitioningToStrategy(true);
         setTimeout(() => {
           setIsCompleted(true);
         }, 6000);
       } else if (data.question) {
-        setMessages([
-          { sender: 'agent', text: data.question },
-        ]);
+        setCurrentQuestion(data.question);
+        setQuestionNumber(1);
+        setAnswerInput('');
       }
     } catch (err) {
       console.error('Failed to start conversation:', err);
@@ -179,16 +165,12 @@ function App() {
     }
   };
 
-  const handleSendMessage = async (e) => {
-    if (e) e.preventDefault();
-    if (!replyInput.trim() || loading) return;
+  const handleNextQuestion = async () => {
+    if (!answerInput.trim() || questionLoading) return;
 
-    const userText = replyInput.trim();
-    setReplyInput('');
-    setError(null);
-
-    setMessages((prev) => [...prev, { sender: 'user', text: userText }]);
-    setLoading(true);
+    const messageText = answerInput.trim();
+    setQuestionLoading(true);
+    setQuestionError(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/reply`, {
@@ -196,11 +178,15 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ thread_id: threadId, message: userText }),
+        body: JSON.stringify({ thread_id: threadId, message: messageText }),
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned status ${response.status}`);
+        const errorData = await response.json().catch(() => null);
+        const detailMsg = errorData && errorData.detail
+          ? (Array.isArray(errorData.detail) ? errorData.detail.map((d) => d.msg).join(', ') : errorData.detail)
+          : null;
+        throw new Error(detailMsg || `Server returned status ${response.status}`);
       }
 
       const data = await response.json();
@@ -208,39 +194,32 @@ function App() {
         setThreadId(data.thread_id);
       }
       setStatus(data.status);
-      setRequirementId(data.requirement_id);
+      setRequirementId(data.requirement_id || null);
 
       if (data.status === 'completed') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            sender: 'agent',
-            text: "Great, I have everything I need! ✨ Generating your personalized marketing strategy...",
-          },
-        ]);
+        setIsTransitioningToStrategy(true);
         setTimeout(() => {
           setIsCompleted(true);
         }, 6000);
       } else if (data.question) {
-        setMessages((prev) => [
-          ...prev,
-          { sender: 'agent', text: data.question }
-        ]);
+        setQuestionNumber((prev) => prev + 1);
+        setCurrentQuestion(data.question);
+        setAnswerInput('');
       }
     } catch (err) {
-      console.error('Failed to send message:', err);
-      setError(err.message || 'Failed to send message. Please try again.');
+      console.error('Failed to send answer:', err);
+      setQuestionError(err.message || 'Failed to send answer. Please try again.');
     } finally {
-      setLoading(false);
+      setQuestionLoading(false);
     }
   };
 
   const handleKeyDown = (e) => {
-    // Enter sends the message, while Shift+Enter creates a new line
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Ctrl+Enter or Cmd+Enter submits the answer, Enter inserts a new line
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      if (!loading && replyInput.trim()) {
-        handleSendMessage();
+      if (!questionLoading && answerInput.trim()) {
+        handleNextQuestion();
       }
     }
   };
@@ -352,65 +331,57 @@ function App() {
             </form>
           </div>
         ) : (
-          /* Full Chat Interface Card */
+          /* Question Wizard Card View */
           <div className="card">
-            {/* Messages Scroll Area */}
-            <div className="chat-scroll-area">
-              {messages.map((msg, index) => (
-                <div key={index} className={`message-wrapper ${msg.sender}`}>
-                  <div className="message-label">
-                    {msg.sender === 'user' ? 'You' : 'Agent'}
-                  </div>
-                  <div className="message-bubble">
-                    {msg.text}
-                  </div>
-                </div>
-              ))}
-
-              {loading && (
-                <div className="message-wrapper agent">
-                  <div className="message-label">Agent</div>
-                  <div className="message-bubble typing-indicator-bubble">
-                    <div className="typing-dots">
-                      <span className="dot" />
-                      <span className="dot" />
-                      <span className="dot" />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Error Banner */}
-            {error && <div className="error-banner" style={{ marginTop: '14px' }}>{error}</div>}
-
-            {/* Multiline Chat Input Form */}
-            <form onSubmit={handleSendMessage} className="chat-input-form">
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <textarea
-                  ref={replyTextareaRef}
-                  className="chat-input-textarea"
-                  value={replyInput}
-                  onChange={(e) => setReplyInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Type your message... (Press Enter to send, Shift+Enter for new line)"
-                  disabled={loading}
-                  rows={3}
-                />
-                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', textAlign: 'right' }}>
-                  Press <kbd style={{ fontFamily: 'sans-serif', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '3px', border: '1px solid #cbd5e1' }}>Enter</kbd> to send, <kbd style={{ fontFamily: 'sans-serif', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '3px', border: '1px solid #cbd5e1' }}>Shift</kbd> + <kbd style={{ fontFamily: 'sans-serif', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '3px', border: '1px solid #cbd5e1' }}>Enter</kbd> for new line
+            {isTransitioningToStrategy ? (
+              <div className="transition-container">
+                <h2 className="transition-title">Generating Your Strategy</h2>
+                <p className="transition-text">
+                  Great, I have everything I need! ✨ Generating your personalized marketing strategy...
+                </p>
+                <div className="typing-dots transition-dots">
+                  <span className="dot" />
+                  <span className="dot" />
+                  <span className="dot" />
                 </div>
               </div>
-              <button
-                type="submit"
-                className="btn-send"
-                disabled={loading || !replyInput.trim()}
-              >
-                Send
-              </button>
-            </form>
+            ) : (
+              <div key={questionNumber} className="question-card-content">
+                <div className="question-step-badge">
+                  Question {questionNumber}
+                </div>
+                <h2 className="question-heading">{currentQuestion}</h2>
+
+                <div className="question-input-wrapper">
+                  <textarea
+                    ref={answerTextareaRef}
+                    className="question-textarea"
+                    value={answerInput}
+                    onChange={(e) => setAnswerInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Type your answer here..."
+                    disabled={questionLoading}
+                    rows={4}
+                  />
+                  <div className="keyboard-hint">
+                    Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to continue
+                  </div>
+                </div>
+
+                {questionError && <div className="error-banner">{questionError}</div>}
+
+                <div className="question-actions">
+                  <button
+                    type="button"
+                    className="btn-primary btn-next"
+                    onClick={handleNextQuestion}
+                    disabled={questionLoading || !answerInput.trim()}
+                  >
+                    {questionLoading ? 'Thinking...' : 'Next'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )
       ) : (

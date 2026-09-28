@@ -37,6 +37,10 @@ class MarketingAgentState(BaseModel):
         default=False,
         description="True if sufficient information has been collected to generate a marketing strategy."
     )
+    analysis_done: bool = Field(
+        default=False,
+        description="Tracks whether the one-time relevance analysis has already run for this conversation."
+    )
     thread_id: Optional[str] = Field(
         default=None,
         description="Unique session/conversation thread identifier for state persistence and LangGraph checkpointing."
