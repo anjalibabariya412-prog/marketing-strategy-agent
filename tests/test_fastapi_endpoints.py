@@ -21,7 +21,11 @@ def test_fastapi_endpoints():
     # -------------------------------------------------------------
     print("\n--- Test 1: POST /start ---")
     start_payload = {
-        "message": "CleanSeas Ocean Cleanup, we run ocean plastic cleanup drives to recruit 500 volunteer cleanup captains, targeting college students aged 18-30."
+        "company_name": "CleanSeas Ocean Cleanup",
+        "product_or_service": "ocean plastic cleanup drives",
+        "marketing_goal": "recruit 500 volunteer cleanup captains",
+        "target_audience": "college students aged 18-30",
+        "budget_resources": "$2,000 promotional budget"
     }
     res_start = client.post("/start", json=start_payload)
     assert res_start.status_code == 200, f"Expected 200, got {res_start.status_code}: {res_start.text}"

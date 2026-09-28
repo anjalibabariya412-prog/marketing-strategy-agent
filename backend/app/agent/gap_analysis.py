@@ -41,7 +41,8 @@ def analyze_relevance(state: MarketingAgentState) -> None:
         f"Company Name: {ctx.company_name or 'Not provided'}\n"
         f"Product/Service: {ctx.product_or_service or 'Not provided'}\n"
         f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}\n"
-        f"Target Audience: {ctx.target_audience or 'Not provided'}"
+        f"Target Audience: {ctx.target_audience or 'Not provided'}\n"
+        f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}"
     )
 
     # Format missing requirements for LLM evaluation

@@ -30,9 +30,9 @@ SYSTEM_PROMPT = (
     "3. NO FORCED FILLER: Fill in ONLY the standard strategy sections that are genuinely relevant and supportable given the known information. "
     "If a section is not applicable or cannot be supportably crafted from what is known (e.g. competitive positioning for a unique entity with no competitors), "
     "set that field to null/None rather than inventing generic content.\n"
-    "4. WORK AROUND UNAVAILABLE INFO: If specific information was marked UNAVAILABLE (e.g. exact budget unknown), provide practical, "
-    "adaptable strategic guidance rather than making up precise numbers.\n"
-    "5. ADDITIONAL SECTIONS: If a specialized, domain-specific section would genuinely add high strategic value for this business "
+    "4. BUDGET UTILIZATION & CONSIDERATIONS: Use the provided Marketing Budget/Resources context when writing the budget-related section (budget_considerations) and recommending tactics. If a marketing budget/resource limit is provided, allocate within it and never exceed it; if Marketing Budget/Resources is 'Not provided', give general low-cost, high-leverage strategic guidance instead.\n"
+    "5. WORK AROUND UNAVAILABLE INFO: If specific information was marked UNAVAILABLE, provide practical, adaptable strategic guidance rather than making up precise numbers.\n"
+    "6. ADDITIONAL SECTIONS: If a specialized, domain-specific section would genuinely add high strategic value for this business "
     "(e.g., 'Volunteer Engagement Strategy' for a non-profit), include it in the 'additional_sections' key as a key-value pair. Otherwise, set 'additional_sections' to null.\n\n"
     "REQUIRED JSON STRUCTURE:\n"
     "You MUST respond ONLY with a JSON object with the following schema:\n"
@@ -66,6 +66,7 @@ def generate_strategy(state: MarketingAgentState) -> MarketingStrategy:
         f"Product/Service: {ctx.product_or_service or 'Not provided'}",
         f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}",
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
+        f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
     ]
 
     # Collect facts from KNOWN requirements

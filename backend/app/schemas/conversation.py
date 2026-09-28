@@ -1,18 +1,56 @@
 from typing import Dict, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.app.models.marketing_strategy import MarketingStrategy
 
 
 class StartRequest(BaseModel):
     """
-    Request payload to start a new marketing strategy conversation.
+    Request payload to start a new marketing strategy conversation using structured business details.
     """
-    message: str = Field(
+    company_name: str = Field(
         ...,
         min_length=1,
-        description="The initial user message describing their business, product/service, goal, and target audience."
+        description="The name of the business or company."
     )
+    product_or_service: str = Field(
+        ...,
+        min_length=1,
+        description="The primary product or service offered by the business."
+    )
+    marketing_goal: str = Field(
+        ...,
+        min_length=1,
+        description="The primary marketing goal or objective."
+    )
+    target_audience: str = Field(
+        ...,
+        min_length=1,
+        description="The target audience or ideal customer profile."
+    )
+    budget_resources: Optional[str] = Field(
+        default=None,
+        description="The marketing budget and resources available for marketing activities."
+    )
+
+    @field_validator("company_name", "product_or_service", "marketing_goal", "target_audience", mode="before")
+    @classmethod
+    def strip_and_validate_required_str(cls, v: str) -> str:
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                raise ValueError("Field cannot be empty or whitespace-only.")
+            return stripped
+        return v
+
+    @field_validator("budget_resources", mode="before")
+    @classmethod
+    def strip_and_validate_budget(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            stripped = v.strip()
+            return stripped if stripped else None
+        return v
+
 
 
 class StartResponse(BaseModel):

@@ -13,9 +13,8 @@ SYSTEM_PROMPT = (
     "Your goal is to evaluate the list of candidate missing requirements against the known business context and pick the SINGLE most strategic requirement to ask about next.\n\n"
     "Prioritization rules:\n"
     "1. Must-have requirements (Must Have: Yes) should generally be prioritized over optional ones.\n"
-    "2. High Priority for Marketing Budget: If 'budget_resources' is still UNKNOWN (present in candidate list), prioritize it over optional and lower-priority requirements so that marketing budget is collected before reaching question limits.\n"
-    "3. However, do NOT simply pick the first must-have item blindly. Reason about which specific requirement provides the highest immediate value or clarity for THIS specific business and its current context.\n"
-    "4. Occasionally, a non-must-have requirement (Must Have: No) may be unusually urgent or foundational for a particular business situation. You may pick a non-must-have item if you clearly reason why it is more critical right now than the remaining must-haves.\n\n"
+    "2. However, do NOT simply pick the first must-have item blindly. Reason about which specific requirement provides the highest immediate value or clarity for THIS specific business and its current context.\n"
+    "3. Occasionally, a non-must-have requirement (Must Have: No) may be unusually urgent or foundational for a particular business situation. You may pick a non-must-have item if you clearly reason why it is more critical right now than the remaining must-haves.\n\n"
     "You MUST respond ONLY with a JSON object in this exact shape:\n"
     "{\n"
     '  "selected_id": "<requirement_id>",\n'
@@ -27,11 +26,8 @@ SYSTEM_PROMPT = (
 
 def _get_default_fallback(candidates: List[InformationRequirement]) -> InformationRequirement:
     """
-    Returns budget_resources if available in candidates, otherwise the first must-have candidate if available, otherwise the first candidate in the list.
+    Returns the first must-have candidate if available, otherwise the first candidate in the list.
     """
-    for req in candidates:
-        if req.id == "budget_resources":
-            return req
     for req in candidates:
         if req.is_must_have:
             return req
@@ -57,6 +53,7 @@ def select_next_requirement(state: MarketingAgentState) -> Optional[InformationR
         f"Product/Service: {ctx.product_or_service or 'Not provided'}",
         f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}",
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
+        f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
     ]
 
     # Include already known requirement values if present
@@ -143,7 +140,6 @@ FALLBACK_QUESTIONS = {
     "competitors": "Which other brands do your customers usually compare you with?",
     "usp_differentiation": "What are the main strengths or key features of your offering?",
     "current_marketing_channels": "Where are you currently promoting your business?",
-    "budget_resources": "How much have you planned to spend on marketing?",
     "pricing_model": "How do you structure your pricing or fees?",
     "brand_tone": "How would you describe the tone of your brand?",
     "sales_process": "How do customers usually buy from you?",
@@ -169,6 +165,7 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
         f"Product/Service: {ctx.product_or_service or 'Not provided'}",
         f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}",
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
+        f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
     ]
 
     # Include resolved requirements status and values (both KNOWN and UNAVAILABLE)

@@ -23,3 +23,8 @@ class BusinessContext(BaseModel):
         default=None,
         description="The target audience, ideal customer profile, or demographic targeted by the business."
     )
+    budget_resources: Optional[str] = Field(
+        default=None,
+        description="The marketing budget and resources (money, time, team) available for marketing activities. Note: this refers to marketing spend, NOT the price of the product or service itself."
+    )
+

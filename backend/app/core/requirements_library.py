@@ -55,19 +55,6 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
         is_custom=False,
     ),
     InformationRequirement(
-        id="budget_resources",
-        title="Budget / Resources",
-        description=(
-            "The money/resources available to the business for marketing activities "
-            "such as advertising, content, influencers, campaigns, etc. "
-            "Note: This is strictly internal marketing spend budget, NOT the customer-facing product price or fee ('pricing_model')."
-        ),
-        is_must_have=True,
-        status=RequirementStatus.UNKNOWN,
-        value=None,
-        is_custom=False,
-    ),
-    InformationRequirement(
         id="pricing_model",
         title="Pricing Model",
         description=(

@@ -21,7 +21,8 @@ def test_strategy_generation():
             company_name="CleanSeas Ocean Cleanup",
             product_or_service="Free ocean plastic cleanup drives and community environmental workshops",
             marketing_goal="Recruit 500 volunteer cleanup captains",
-            target_audience="Environmentally conscious college students aged 18-30"
+            target_audience="Environmentally conscious college students aged 18-30",
+            budget_resources="$1,500 promotional budget and 2 full-time staff members."
         )
     )
     load_requirements_into_state(state)
@@ -30,11 +31,6 @@ def test_strategy_generation():
     if pain_req:
         pain_req.status = RequirementStatus.KNOWN
         pain_req.value = "Students want to help the environment but lack structured local cleanup groups."
-
-    budget_req = state.get_requirement_by_id("budget_resources")
-    if budget_req:
-        budget_req.status = RequirementStatus.KNOWN
-        budget_req.value = "$1,500 promotional budget and 2 full-time staff members."
 
     strategy = generate_strategy(state)
     assert strategy is not None

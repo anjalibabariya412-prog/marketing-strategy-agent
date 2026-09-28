@@ -49,10 +49,10 @@ def test_sufficiency_check():
     load_requirements_into_state(state_b)
     # Must-haves remain UNKNOWN
 
-    # Add 6 QA turns (matching settings.max_questions)
+    # Add max_questions QA turns
     state_b.qa_history = [
         QATurn(question=f"Question {i}", answer=f"Answer {i}", requirement_id=f"req{i}")
-        for i in range(1, 7)
+        for i in range(1, settings.max_questions + 1)
     ]
 
     result_b = is_sufficient(state_b)
@@ -62,7 +62,7 @@ def test_sufficiency_check():
     print(f"is_sufficient(state_b) -> {result_b} (Expected: True)\n")
     assert result_b is True, "Scenario B failed! Expected True."
 
-    # Scenario C: Must-haves unresolved AND qa_history has fewer than 6 entries (e.g. 3 turns) -> Expected False
+    # Scenario C: Must-haves unresolved AND qa_history has fewer than max_questions entries (e.g. 3 turns) -> Expected False
     print("--- Scenario C: Must-haves unresolved, 3 QA turns ---")
     state_c = MarketingAgentState()
     load_requirements_into_state(state_c)

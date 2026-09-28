@@ -5,8 +5,8 @@ from fastapi import APIRouter, HTTPException, status
 from langgraph.types import Command
 
 from backend.app.models.agent_state import MarketingAgentState
+from backend.app.models.business_context import BusinessContext
 from backend.app.core.requirements_library import load_requirements_into_state
-from backend.app.agent.answer_processing import extract_initial_context
 from backend.app.agent.graph import graph
 from backend.app.schemas.conversation import (
     StartRequest,
@@ -24,16 +24,21 @@ router = APIRouter(tags=["Conversation"])
 @router.post("/start", response_model=StartResponse, status_code=status.HTTP_200_OK)
 def start_conversation(request: StartRequest):
     """
-    Starts a new marketing strategy conversation.
-    Extracts initial business context from the user's message, initializes state,
-    and invokes the LangGraph workflow until it pauses on the first question or completes.
+    Starts a new marketing strategy conversation using structured initial business context,
+    initializes state, and invokes the LangGraph workflow until it pauses on the first question or completes.
     """
     try:
         thread_id = str(uuid.uuid4())
         logger.info(f"Starting new conversation with thread_id: '{thread_id}'")
 
-        # 1. Extract initial context from user message
-        context = extract_initial_context(request.message)
+        # 1. Build initial context from structured request fields
+        context = BusinessContext(
+            company_name=request.company_name,
+            product_or_service=request.product_or_service,
+            marketing_goal=request.marketing_goal,
+            target_audience=request.target_audience,
+            budget_resources=request.budget_resources
+        )
 
         # 2. Create state and load requirements
         state = MarketingAgentState(
