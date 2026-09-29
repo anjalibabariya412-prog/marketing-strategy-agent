@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     # Maximum clarifying questions limit before forcing strategy generation
     max_questions: int = 7
 
+    # Flag to enable 1-call-per-turn optimization (merged answer processing + next question planning)
+    merged_turn_call_enabled: bool = True
+
+    # Flag to enable extra requirement proposal during relevance analysis (M2.1)
+    extra_requirement_enabled: bool = True
+
     # Postgres Database settings
     database_url: str = "postgresql://postgres:postgres@localhost:5432/marketing_agent_db"
 

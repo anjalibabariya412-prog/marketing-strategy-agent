@@ -11,26 +11,36 @@ class StartRequest(BaseModel):
     company_name: str = Field(
         ...,
         min_length=1,
+        max_length=1000,
         description="The name of the business or company."
     )
     product_or_service: str = Field(
         ...,
         min_length=1,
+        max_length=750,
         description="The primary product or service offered by the business."
     )
     marketing_goal: str = Field(
         ...,
         min_length=1,
+        max_length=500,
         description="The primary marketing goal or objective."
     )
     target_audience: str = Field(
         ...,
         min_length=1,
+        max_length=750,
         description="The target audience or ideal customer profile."
     )
     budget_resources: Optional[str] = Field(
         default=None,
+        max_length=200,
         description="The marketing budget and resources available for marketing activities."
+    )
+    current_marketing_channels: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="The marketing channels currently in use by the business."
     )
 
     @field_validator("company_name", "product_or_service", "marketing_goal", "target_audience", mode="before")
@@ -46,6 +56,14 @@ class StartRequest(BaseModel):
     @field_validator("budget_resources", mode="before")
     @classmethod
     def strip_and_validate_budget(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            stripped = v.strip()
+            return stripped if stripped else None
+        return v
+
+    @field_validator("current_marketing_channels", mode="before")
+    @classmethod
+    def strip_and_validate_current_marketing_channels(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             stripped = v.strip()
             return stripped if stripped else None

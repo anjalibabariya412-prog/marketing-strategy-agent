@@ -6,9 +6,10 @@ from langgraph.types import interrupt
 
 from backend.app.core.config import settings
 from backend.app.models.agent_state import MarketingAgentState
+from backend.app.models.information_requirement import RequirementStatus
 from backend.app.agent.gap_analysis import analyze_relevance
 from backend.app.agent.question_selection import prepare_next_question
-from backend.app.agent.answer_processing import process_answer_for_requirement
+from backend.app.agent.answer_processing import process_answer_for_requirement, process_answer_and_plan_next
 from backend.app.agent.sufficiency_check import is_sufficient
 from backend.app.agent.strategy_generation import generate_strategy
 
@@ -47,25 +48,39 @@ def route_after_analyze(state: MarketingAgentState) -> str:
 
 def ask_node(state: MarketingAgentState) -> MarketingAgentState:
     """
-    Graph Node: Generates question if needed, pauses for user answer via interrupt(),
-    and processes the user's answer via process_answer_for_requirement upon resumption.
+    Graph Node: Generates question if needed (using pending question if available),
+    pauses for user answer via interrupt(), and processes the user's answer upon resumption.
     """
     logger.info(
         f"Graph Node [ask] ENTRY | thread_id: '{state.thread_id}' | "
-        f"active_req: '{state.active_requirement_id}' | current_question: '{state.current_question}'"
+        f"active_req: '{state.active_requirement_id}' | current_question: '{state.current_question}' | "
+        f"pending_req: '{state.pending_requirement_id}'"
     )
 
-    # 1. Prepare next question ONLY if one is not already pending (e.g. first time, not resume)
+    # 1. Prepare next question if one is not already pending (e.g. first time or after answer processing)
     if not state.current_question or not state.active_requirement_id:
-        logger.info("Graph Node [ask]: Preparing next question (prepare_next_question CALLED)")
-        prepare_next_question(state)
-        logger.info(
-            f"Graph Node [ask]: After prepare_next_question -> active_req: '{state.active_requirement_id}', "
-            f"question: '{state.current_question}'"
-        )
+        if state.pending_question and state.pending_requirement_id:
+            pending_req = state.get_requirement_by_id(state.pending_requirement_id)
+            asked_ids = {turn.requirement_id for turn in state.qa_history if turn.requirement_id} if state.qa_history else set()
+            if pending_req and pending_req.status == RequirementStatus.UNKNOWN and pending_req.id not in asked_ids:
+                logger.info(f"Graph Node [ask]: Using pre-planned pending question for requirement '{state.pending_requirement_id}'")
+                state.current_question = state.pending_question
+                state.active_requirement_id = state.pending_requirement_id
+                state.pending_question = None
+                state.pending_requirement_id = None
+            else:
+                logger.info("Graph Node [ask]: Pending requirement is no longer valid/UNKNOWN -> Falling back to prepare_next_question()")
+                state.pending_question = None
+                state.pending_requirement_id = None
+                prepare_next_question(state)
+        else:
+            logger.info("Graph Node [ask]: No pending question -> Calling prepare_next_question()")
+            state.pending_question = None
+            state.pending_requirement_id = None
+            prepare_next_question(state)
     else:
         logger.info(
-            f"Graph Node [ask]: Skipping prepare_next_question() because question already pending -> "
+            f"Graph Node [ask]: Skipping question prep because current question already active -> "
             f"active_req: '{state.active_requirement_id}'"
         )
 
@@ -80,10 +95,14 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
         "requirement_id": state.active_requirement_id
     })
 
-    # 3. Resumed: Process the user answer using LLM classification and state update
-    logger.info(f"Graph Node [ask]: Resumed with user answer: '{user_answer}' on active_req: '{state.active_requirement_id}'")
+    # 3. Resumed: Process the user answer and optionally plan next question in one call
     if user_answer:
-        process_answer_for_requirement(state, str(user_answer))
+        if settings.merged_turn_call_enabled:
+            logger.info(f"Graph Node [ask]: Resumed with answer -> Calling process_answer_and_plan_next()")
+            process_answer_and_plan_next(state, str(user_answer))
+        else:
+            logger.info(f"Graph Node [ask]: Resumed with answer -> Calling process_answer_for_requirement()")
+            process_answer_for_requirement(state, str(user_answer))
 
     return state
 
@@ -94,6 +113,8 @@ def generate_node(state: MarketingAgentState) -> MarketingAgentState:
     storing the output in state.final_strategy.
     """
     logger.info("Graph Node [generate]: Running generate_strategy()")
+    state.pending_question = None
+    state.pending_requirement_id = None
     strategy = generate_strategy(state)
     state.final_strategy = strategy
     state.is_sufficient = True

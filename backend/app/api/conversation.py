@@ -37,7 +37,8 @@ def start_conversation(request: StartRequest):
             product_or_service=request.product_or_service,
             marketing_goal=request.marketing_goal,
             target_audience=request.target_audience,
-            budget_resources=request.budget_resources
+            budget_resources=request.budget_resources,
+            current_marketing_channels=request.current_marketing_channels
         )
 
         # 2. Create state and load requirements

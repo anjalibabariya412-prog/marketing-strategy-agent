@@ -41,6 +41,14 @@ class MarketingAgentState(BaseModel):
         default=False,
         description="Tracks whether the one-time relevance analysis has already run for this conversation."
     )
+    pending_question: Optional[str] = Field(
+        default=None,
+        description="The pre-planned next question generated in a merged turn call, waiting to be served."
+    )
+    pending_requirement_id: Optional[str] = Field(
+        default=None,
+        description="The requirement ID associated with pending_question."
+    )
     thread_id: Optional[str] = Field(
         default=None,
         description="Unique session/conversation thread identifier for state persistence and LangGraph checkpointing."

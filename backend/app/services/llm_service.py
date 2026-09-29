@@ -48,6 +48,7 @@ def get_llm_response(prompt: str, system_prompt: str = None, response_format: di
         kwargs["temperature"] = temperature
 
     try:
+        logger.info(f"Calling LLM ({settings.groq_model})")
         response = client.chat.completions.create(**kwargs)
         content = response.choices[0].message.content
         return _clean_json_string(content)

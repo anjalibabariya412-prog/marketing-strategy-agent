@@ -42,7 +42,21 @@ def select_next_requirement(state: MarketingAgentState) -> Optional[InformationR
     Uses LLM reasoning based on business context and already-known requirement values.
     Falls back safely to the first must-have candidate (or first candidate) if LLM fails or returns an invalid ID.
     """
-    candidates = state.get_missing_requirements()
+    already_asked_or_resolved_ids = {
+        req.id for req in state.requirements 
+        if req.status != RequirementStatus.UNKNOWN
+    }
+    if state.qa_history:
+        for turn in state.qa_history:
+            if turn.requirement_id:
+                already_asked_or_resolved_ids.add(turn.requirement_id)
+    if state.active_requirement_id:
+        already_asked_or_resolved_ids.add(state.active_requirement_id)
+
+    candidates = [
+        req for req in state.requirements 
+        if req.status == RequirementStatus.UNKNOWN and req.id not in already_asked_or_resolved_ids
+    ]
     if not candidates:
         return None
 
@@ -54,6 +68,7 @@ def select_next_requirement(state: MarketingAgentState) -> Optional[InformationR
         f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}",
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
+        f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
     ]
 
     # Include already known requirement values if present
@@ -125,18 +140,20 @@ QUESTION_GEN_SYSTEM_PROMPT = (
     "Your goal is to ask ONE short, simple, direct question to collect a specific piece of missing information.\n\n"
     "CRITICAL RULES FOR QUESTION PHRASING:\n"
     "1. CONCEPT TRANSLATION: The requirement title/ID is an internal system concept. Do NOT blindly convert or mechanically copy the requirement title verbatim into a question. Ask about the underlying practical information needed.\n"
-    "2. BUSINESS CONTEXT & TYPE ADAPTATION: Adapt your language, terminology, and phrasing naturally to match the SPECIFIC business type, product/service, and business model described in the context — do not assume or default to any particular category (subscription, retail, service, etc.). Infer what payment/pricing/operational terminology is natural for THIS business from the context actually provided, rather than mapping it to a fixed set of business categories.\n"
-    "3. GROUNDED IN CONTEXT (NO UNFOUNDED ASSUMPTIONS): Stay strictly grounded in the conversation context. Do NOT introduce ungrounded assumptions or specific customer journey stages (e.g., 'before they hire you', 'before purchasing', 'during onboarding', 'after buying') unless explicitly mentioned in the context.\n"
-    "   - For 'customer_pain_points': ask broadly about the core problems, challenges, frustrations, or needs that the business or offering helps customers solve.\n"
-    "4. PREVIOUS QUESTIONS & AVOID REPETITION: Review the previous conversation Q&A history. Do NOT repeat questions, exact template phrases, or wordings that have already been asked or answered.\n"
+    "2. BUSINESS CONTEXT & BRAND INTEGRATION: Weave the specific company name, product, or service name naturally into the question whenever it improves clarity and sounds conversational (e.g. asking 'Which channels are you currently using to promote [Company/Product]?' or 'How is [Product] currently priced?' instead of generic placeholders like 'your business' or 'your offering'). Do NOT force the name if it creates awkward repetition (such as 'your [Company] business'). Never invent unprovided facts.\n"
+    "3. GROUNDED IN CONTEXT & CONTEXT-APPROPRIATE FRAMING: Stay strictly grounded in the conversation context. Do NOT introduce ungrounded assumptions, specific customer journey stages, or assume customers have problems, frustrations, or dissatisfaction.\n"
+    "   - For 'customer_pain_points': Interpret this broadly as understanding customer needs, preferences, motivations, decision factors, or problems, depending on the actual business and offering. Choose the framing based on the business context. Do NOT assume customers have problems, frustrations, dissatisfaction, or challenges. Use 'challenges/problems' ONLY when the business context supports it (e.g., software or services solving explicit pain points). For businesses where customers are making a preference or purchase choice (e.g., a café, home decor, food/lifestyle), ask what target customers typically look for, prefer, or consider when choosing that type of offering.\n"
+    "4. PREVIOUS QUESTIONS & AVOID REPETITION: Review the previous conversation Q&A history. Do NOT repeat questions, exact template phrases, sentence structures, or recurring openings that have already been used. Vary the natural phrasing based on the context and the specific information being collected.\n"
     "5. COMPETITOR AWARENESS: Never reference competitors if the user indicated there are no direct competitors or if 'competitors' status is UNAVAILABLE. For USP/Differentiation when no competitors exist, ask naturally about key software/offering features, unique capabilities, or main strengths.\n"
     "6. CLARITY & ACCURACY OVER FORCED VARIATION: Prioritize clarity, naturalness, and business relevance. Ask only for the information needed by the selected requirement without inventing extra details.\n"
-    "7. CONCISE & DIRECT: Keep the question concise, normally under 20 words.. No formal preambles (e.g., 'Could you tell me...', 'Can you elaborate...'), no bulleted lists, and no raw system jargon.\n"
-    "8. OUTPUT FORMAT: Return ONLY the raw question text. No quotes, no markdown, no preamble."
+    "7. CONCISE & DIRECT: Keep the question concise, normally under 20 words. No formal preambles (e.g., 'Could you tell me...', 'Can you elaborate...'), no bulleted lists, and no raw system jargon.\n"
+    "8. NO ASSUMPTION OF PROBLEMS: Do not assume the customer has a problem, frustration or challenge unless the business context suggests one. For businesses where people are simply choosing among pleasant options (for example a cafe, a bakery, a gift shop), ask about what they are looking for, what occasion brings them, or what makes them choose this place, instead of asking what problem or challenge they have.\n"
+    "9. OUTPUT FORMAT: Return ONLY the raw question text. No quotes, no markdown, no preamble.\n"
+    "10. NATURAL VARIATION: Do not rely on a single question template for any requirement. The same requirement may be asked in different ways depending on the business context. Vary the question structure naturally while preserving the exact information being requested. Avoid repeatedly starting questions with phrases such as 'What is the biggest...', 'What are the main...', 'What challenges...', or 'What frustrations...'.\n"
 )
 
 FALLBACK_QUESTIONS = {
-    "customer_pain_points": "What is the main problem your customers are looking to solve?",
+    "customer_pain_points": "What do your target customers typically look for or consider when choosing your offering?",
     "competitors": "Which other brands do your customers usually compare you with?",
     "usp_differentiation": "What are the main strengths or key features of your offering?",
     "current_marketing_channels": "Where are you currently promoting your business?",
@@ -166,6 +183,7 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
         f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}",
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
+        f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
     ]
 
     # Include resolved requirements status and values (both KNOWN and UNAVAILABLE)
@@ -196,10 +214,12 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
         f"- Requirement: {selected_requirement.title} ({selected_requirement.id})\n"
         f"- Description: {selected_requirement.description}\n\n"
         f"INSTRUCTIONS:\n"
-        f"- Use natural wording appropriate for this business type ({ctx.product_or_service or 'business'}).\n"
+        f"- Use natural, conversational wording tailored to this specific business and product ({ctx.product_or_service or ctx.company_name or 'the business'}).\n"
+        f"- Integrate the known business name ({ctx.company_name}) or product/service name ({ctx.product_or_service}) naturally into the question where it improves clarity, avoiding generic phrases like 'your business' or 'your offering' when the specific name fits far better.\n"
+        f"- Do NOT force the business name into every phrase if it sounds unnatural or redundant.\n"
         f"- Stay grounded: do NOT invent ungrounded assumptions or journey stages (like 'before hiring you' or 'during checkout').\n"
-        f"- For customer_pain_points: ask broadly about the main problems, challenges, or needs their customers face that this business helps solve.\n"
-        f"- For pricing: ask using business-appropriate terms (e.g., subscription plans / pricing model for software/SaaS, service fees for services, price range for physical products).\n"
+        f"- For customer_pain_points: Choose the appropriate framing based on the business type. Do NOT assume customers have problems or challenges. Use 'challenges/problems' only when the business context supports it. For preference or purchase choices, ask what customers typically look for, prefer, or consider when choosing this type of offering.\n"
+        f"- For pricing: ask using business-appropriate terms naturally referencing the product or service.\n"
         f"- For USP/differentiation: if competitors are marked unavailable or no competitors exist, ask about key features/strengths WITHOUT mentioning competitors.\n"
         f"- Do NOT copy template questions verbatim; generate a fresh, contextually natural question.\n\n"
         f"Write ONE short, natural, 1-sentence direct question to ask the owner of {ctx.company_name or 'this business'} to gather this information."
@@ -220,10 +240,16 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
     except (LLMServiceError, Exception) as e:
         logger.error(f"generate_question error: {e}. Falling back to template question.")
 
-    fallback_question = FALLBACK_QUESTIONS.get(
+    fallback_raw = FALLBACK_QUESTIONS.get(
         selected_requirement.id,
         f"What details can you share about your {selected_requirement.title.lower()}?"
     )
+    if ctx.product_or_service or ctx.company_name:
+        name = ctx.product_or_service or ctx.company_name
+        fallback_question = fallback_raw.replace("your business", name).replace("your offering", name)
+    else:
+        fallback_question = fallback_raw
+
     logger.info(f"Fallback question used: {fallback_question}")
     return fallback_question
 

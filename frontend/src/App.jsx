@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import './App.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
@@ -23,6 +24,7 @@ function App() {
     marketing_goal: '',
     target_audience: '',
     budget_resources: '',
+    current_marketing_channels: '',
   });
   const [formErrors, setFormErrors] = useState({});
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -30,6 +32,7 @@ function App() {
 
   // Question Wizard State
   const [threadId, setThreadId] = useState(null);
+  const [showIntroScreen, setShowIntroScreen] = useState(false);
   const [status, setStatus] = useState(null);
   const [requirementId, setRequirementId] = useState(null);
   const [questionNumber, setQuestionNumber] = useState(1);
@@ -49,10 +52,10 @@ function App() {
 
   // Auto-focus textarea whenever a new question appears or question card is active
   useEffect(() => {
-    if (threadId && !isCompleted && !isTransitioningToStrategy) {
+    if (threadId && !showIntroScreen && !isCompleted && !isTransitioningToStrategy) {
       answerTextareaRef.current?.focus();
     }
-  }, [currentQuestion, threadId, isCompleted, isTransitioningToStrategy]);
+  }, [currentQuestion, threadId, showIntroScreen, isCompleted, isTransitioningToStrategy]);
 
   // Fetch strategy automatically when conversation completes
   useEffect(() => {
@@ -107,6 +110,7 @@ function App() {
       errors.target_audience = 'Target audience is required.';
     }
 
+
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) {
       return;
@@ -121,6 +125,7 @@ function App() {
       marketing_goal: formData.marketing_goal.trim(),
       target_audience: formData.target_audience.trim(),
       budget_resources: formData.budget_resources.trim() || null,
+      current_marketing_channels: formData.current_marketing_channels.trim() || null,
     };
 
     try {
@@ -156,6 +161,7 @@ function App() {
         setCurrentQuestion(data.question);
         setQuestionNumber(1);
         setAnswerInput('');
+        setShowIntroScreen(true);
       }
     } catch (err) {
       console.error('Failed to start conversation:', err);
@@ -236,10 +242,10 @@ function App() {
           /* Business Context Form Screen */
           <div className="card">
             <h2 className="form-heading">Tell us about your business</h2>
-            <form onSubmit={handleStartSubmit} className="start-form" noValidate>
+            <form onSubmit={handleStartSubmit} className="start-form" noValidate autoComplete="off">
               <div className="form-group">
                 <label className="form-label" htmlFor="company_name">
-                  What is your business, and what does it offer? <span className="required-star">*</span>
+                  Tell us about your business and what it does. <span className="required-star">*</span>
                 </label>
                 <input
                   id="company_name"
@@ -248,9 +254,12 @@ function App() {
                   value={formData.company_name}
                   onChange={(e) => handleInputChange('company_name', e.target.value)}
                   disabled={formSubmitting}
+                  autoComplete="off"
                 />
                 {formErrors.company_name && (
-                  <div className="field-error">{formErrors.company_name}</div>
+                  <div className="field-footer">
+                    <div className="field-error">{formErrors.company_name}</div>
+                  </div>
                 )}
               </div>
 
@@ -265,9 +274,12 @@ function App() {
                   value={formData.product_or_service}
                   onChange={(e) => handleInputChange('product_or_service', e.target.value)}
                   disabled={formSubmitting}
+                  autoComplete="off"
                 />
                 {formErrors.product_or_service && (
-                  <div className="field-error">{formErrors.product_or_service}</div>
+                  <div className="field-footer">
+                    <div className="field-error">{formErrors.product_or_service}</div>
+                  </div>
                 )}
               </div>
 
@@ -282,15 +294,18 @@ function App() {
                   value={formData.marketing_goal}
                   onChange={(e) => handleInputChange('marketing_goal', e.target.value)}
                   disabled={formSubmitting}
+                  autoComplete="off"
                 />
                 {formErrors.marketing_goal && (
-                  <div className="field-error">{formErrors.marketing_goal}</div>
+                  <div className="field-footer">
+                    <div className="field-error">{formErrors.marketing_goal}</div>
+                  </div>
                 )}
               </div>
 
               <div className="form-group">
                 <label className="form-label" htmlFor="target_audience">
-                  Who are you trying to reach with your product or service? <span className="required-star">*</span>
+                  Who is your target audience?<span className="required-star">*</span>
                 </label>
                 <textarea
                   id="target_audience"
@@ -299,15 +314,18 @@ function App() {
                   value={formData.target_audience}
                   onChange={(e) => handleInputChange('target_audience', e.target.value)}
                   disabled={formSubmitting}
+                  autoComplete="off"
                 />
                 {formErrors.target_audience && (
-                  <div className="field-error">{formErrors.target_audience}</div>
+                  <div className="field-footer">
+                    <div className="field-error">{formErrors.target_audience}</div>
+                  </div>
                 )}
               </div>
 
               <div className="form-group">
                 <label className="form-label" htmlFor="budget_resources">
-                  How much are you planning to invest in marketing?
+                  How much are you planning to invest in marketing? <span className="required-star">*</span>
                 </label>
                 <input
                   id="budget_resources"
@@ -316,7 +334,28 @@ function App() {
                   value={formData.budget_resources}
                   onChange={(e) => handleInputChange('budget_resources', e.target.value)}
                   disabled={formSubmitting}
+                  autoComplete="off"
                 />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="current_marketing_channels">
+                  Which marketing channels are you currently using? (e.g., Instagram, Google Ads, Offline flyers) <span className="required-star">*</span>
+                </label>
+                <textarea
+                  id="current_marketing_channels"
+                  className={`form-textarea ${formErrors.current_marketing_channels ? 'invalid' : ''}`}
+                  rows={3}
+                  value={formData.current_marketing_channels}
+                  onChange={(e) => handleInputChange('current_marketing_channels', e.target.value)}
+                  disabled={formSubmitting}
+                  autoComplete="off"
+                />
+                {formErrors.current_marketing_channels && (
+                  <div className="field-footer">
+                    <div className="field-error">{formErrors.current_marketing_channels}</div>
+                  </div>
+                )}
               </div>
 
               {startError && <div className="error-banner">{startError}</div>}
@@ -333,23 +372,36 @@ function App() {
         ) : (
           /* Question Wizard Card View */
           <div className="card">
-            {isTransitioningToStrategy ? (
-              <div className="transition-container">
-                <h2 className="transition-title">Generating Your Strategy</h2>
-                <p className="transition-text">
-                  Great, I have everything I need! ✨ Generating your personalized marketing strategy...
+            {showIntroScreen ? (
+              <div className="intro-card-content">
+                <h2 className="intro-heading">Let's build your strategy</h2>
+                <p className="intro-text">
+                  Thanks for sharing the basics about your business. To create a strategy that's relevant to your specific business, I need a few more details. I'll ask a few focused questions based on the information you've provided.
                 </p>
-                <div className="typing-dots transition-dots">
+                <div className="intro-actions">
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => setShowIntroScreen(false)}
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            ) : isTransitioningToStrategy ? (
+              <div className="transition-container">
+                <h2 className="transition-title">I have everything I need.</h2>
+                <p className="transition-text">
+                  Generating your personalized marketing strategy...
+                </p>
+                <div className="loading-dots">
                   <span className="dot" />
                   <span className="dot" />
                   <span className="dot" />
                 </div>
               </div>
             ) : (
-              <div key={questionNumber} className="question-card-content">
-                <div className="question-step-badge">
-                  Question {questionNumber}
-                </div>
+              <div key={currentQuestion || questionNumber} className="question-card-content">
                 <h2 className="question-heading">{currentQuestion}</h2>
 
                 <div className="question-input-wrapper">
@@ -362,6 +414,7 @@ function App() {
                     placeholder="Type your answer here..."
                     disabled={questionLoading}
                     rows={4}
+                    autoComplete="off"
                   />
                   <div className="keyboard-hint">
                     Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to continue
@@ -422,10 +475,14 @@ function App() {
                   return null;
                 }
 
+                const formattedContent = val.replace(/\\n/g, '\n').trim();
+
                 return (
                   <section key={key} className="strategy-section">
                     <h3 className="section-title">{label}</h3>
-                    <p className="section-content">{val.trim()}</p>
+                    <div className="section-content">
+                      <ReactMarkdown>{formattedContent}</ReactMarkdown>
+                    </div>
                   </section>
                 );
               })}
@@ -438,10 +495,14 @@ function App() {
                     return null;
                   }
 
+                  const formattedContent = content.replace(/\\n/g, '\n').trim();
+
                   return (
                     <section key={title} className="strategy-section">
                       <h3 className="section-title">{title}</h3>
-                      <p className="section-content">{content.trim()}</p>
+                      <div className="section-content">
+                        <ReactMarkdown>{formattedContent}</ReactMarkdown>
+                      </div>
                     </section>
                   );
                 })}

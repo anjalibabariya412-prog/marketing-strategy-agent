@@ -8,11 +8,11 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
         id="customer_pain_points",
         title="Customer Pain Points",
         description=(
-            "The specific problems, frustrations, or unmet needs that drive a customer "
-            "to seek out a solution. Understanding this is essential for crafting compelling "
-            "value propositions, targeted messaging, and strategic positioning."
+            "The specific problem, frustration, or unmet need that drives someone to this business "
+            "when one exists, and otherwise the occasion, motivation, or purpose that brings them "
+            "(for example wanting a comfortable place to meet or work)."
         ),
-        is_must_have=True,
+        is_must_have=False,
         status=RequirementStatus.UNKNOWN,
         value=None,
         is_custom=False,
@@ -36,18 +36,6 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
         description=(
             "The unique attributes, features, or positioning that make this business distinct "
             "from alternatives. Essential for establishing a clear competitive edge and value prop."
-        ),
-        is_must_have=True,
-        status=RequirementStatus.UNKNOWN,
-        value=None,
-        is_custom=False,
-    ),
-    InformationRequirement(
-        id="current_marketing_channels",
-        title="Current Marketing Channels",
-        description=(
-            "The marketing channels and promotional activities currently in use, along with "
-            "their relative performance, preventing redundant efforts and leveraging active channels."
         ),
         is_must_have=True,
         status=RequirementStatus.UNKNOWN,
@@ -90,7 +78,7 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
             "(e.g., online checkout, consultative sales call, or direct interaction). Helps "
             "in designing effective funnels and customer journeys."
         ),
-        is_must_have=False,
+        is_must_have=True,
         status=RequirementStatus.UNKNOWN,
         value=None,
         is_custom=False,
@@ -114,7 +102,7 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
             "The geographic scope served by the business (e.g., local, regional, national, "
             "or global), influencing channel selection, targeting, and localization choices."
         ),
-        is_must_have=False,
+        is_must_have=True,
         status=RequirementStatus.UNKNOWN,
         value=None,
         is_custom=False,

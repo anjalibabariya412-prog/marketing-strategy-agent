@@ -1,6 +1,9 @@
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api import conversation_router
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Marketing Strategy Agent")
 
