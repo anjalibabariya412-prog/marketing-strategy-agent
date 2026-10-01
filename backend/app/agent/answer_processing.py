@@ -70,7 +70,8 @@ _PRIORITIZATION_SECTION = (
     "REQUIREMENT SELECTION PRIORITIZATION RULES:\n"
     "1. Must-have requirements (Must Have: Yes) should generally be prioritized over optional ones.\n"
     "2. However, do NOT simply pick the first must-have item blindly. Reason about which specific requirement provides the highest immediate value or clarity for THIS specific business and its current context.\n"
-    "3. Occasionally, a non-must-have requirement (Must Have: No) may be unusually urgent or foundational for a particular business situation. You may pick a non-must-have item if you clearly reason why it is more critical right now than the remaining must-haves."
+    "3. Occasionally, a non-must-have requirement (Must Have: No) may be unusually urgent or foundational for a particular business situation. You may pick a non-must-have item if you clearly reason why it is more critical right now than the remaining must-haves.\n"
+    "4. Do NOT select a requirement for 'next' if it is already adequately covered by the business context or past marketing document summary."
 )
 
 _QUESTION_PHRASING_RULES = QUESTION_GEN_SYSTEM_PROMPT.split("9. OUTPUT FORMAT:")[0].strip()
@@ -101,6 +102,7 @@ MERGED_TURN_SYSTEM_PROMPT = (
     "IMPORTANT FOR 'next': 'selected_id' MUST be chosen ONLY from candidate requirements that remain UNKNOWN after applying the active and incidentally answered requirements. If no candidate requirements remain UNKNOWN, set 'next' to null.\n"
     "Do NOT include markdown formatting or commentary outside the JSON object."
 )
+
 
 
 def extract_initial_context(user_message: str) -> BusinessContext:
@@ -286,7 +288,9 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
         f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
+        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}",
     ]
+
 
     # Include resolved requirements status and values (both KNOWN and UNAVAILABLE)
     resolved_reqs = [

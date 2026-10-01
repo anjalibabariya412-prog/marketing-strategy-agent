@@ -25,7 +25,8 @@ def test_fastapi_endpoints():
         "product_or_service": "ocean plastic cleanup drives",
         "marketing_goal": "recruit 500 volunteer cleanup captains",
         "target_audience": "college students aged 18-30",
-        "budget_resources": "$2,000 promotional budget"
+        "budget_resources": "$2,000 promotional budget",
+        "website_social_links": "https://cleanseas.org\nhttps://instagram.com/cleanseas"
     }
     res_start = client.post("/start", json=start_payload)
     assert res_start.status_code == 200, f"Expected 200, got {res_start.status_code}: {res_start.text}"
@@ -130,5 +131,45 @@ def test_fastapi_endpoints():
     print("\n=== All FastAPI Integration Tests Passed Successfully! ===")
 
 
+def test_website_social_links_validation():
+    print("\n=== Testing Task 2: website_social_links Schema Validation ===")
+    from backend.app.schemas.conversation import StartRequest
+    from backend.app.models.business_context import BusinessContext
+
+    base_payload = {
+        "company_name": "Test Company",
+        "product_or_service": "Test Product",
+        "marketing_goal": "Test Goal",
+        "target_audience": "Test Audience"
+    }
+
+    # Case 1: Omitted -> None
+    req1 = StartRequest(**base_payload)
+    assert req1.website_social_links is None, "Expected None when field is omitted"
+
+    # Case 2: Whitespace only -> None
+    req2 = StartRequest(**base_payload, website_social_links="   \n  \t ")
+    assert req2.website_social_links is None, "Expected None for whitespace-only input"
+
+    # Case 3: Multiple URLs with surrounding whitespace -> trimmed with preserved internal newlines
+    raw_urls = "  \n  https://example.com  \nhttps://instagram.com/example  \n "
+    req3 = StartRequest(**base_payload, website_social_links=raw_urls)
+    assert req3.website_social_links == "https://example.com  \nhttps://instagram.com/example", \
+        f"Unexpected trimmed result: {repr(req3.website_social_links)}"
+
+    # Case 4: Context binding
+    ctx = BusinessContext(
+        company_name=req3.company_name,
+        product_or_service=req3.product_or_service,
+        marketing_goal=req3.marketing_goal,
+        target_audience=req3.target_audience,
+        website_social_links=req3.website_social_links
+    )
+    assert ctx.website_social_links == "https://example.com  \nhttps://instagram.com/example"
+
+    print("✓ All website_social_links validation tests passed successfully!")
+
+
 if __name__ == "__main__":
+    test_website_social_links_validation()
     test_fastapi_endpoints()

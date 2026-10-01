@@ -25,12 +25,19 @@ def _clean_json_string(text: str) -> str:
     return text
 
 
-def get_llm_response(prompt: str, system_prompt: str = None, response_format: dict = None, temperature: float = None) -> str:
+def get_llm_response(
+    prompt: str,
+    system_prompt: str = None,
+    response_format: dict = None,
+    temperature: float = None,
+    model: str = None
+) -> str:
     """
     Sends a prompt to the Groq LLM and returns the response text.
-    Supports optional response_format (e.g. {"type": "json_object"}) and temperature.
+    Supports optional model override, response_format (e.g. {"type": "json_object"}), and temperature.
     Includes fallback retry if Groq's strict server-side json_object validation fails.
     """
+    target_model = model or settings.groq_model
     client = Groq(api_key=settings.groq_api_key)
 
     messages = []
@@ -39,7 +46,7 @@ def get_llm_response(prompt: str, system_prompt: str = None, response_format: di
     messages.append({"role": "user", "content": prompt})
 
     kwargs = {
-        "model": settings.groq_model,
+        "model": target_model,
         "messages": messages,
     }
     if response_format:
@@ -48,10 +55,11 @@ def get_llm_response(prompt: str, system_prompt: str = None, response_format: di
         kwargs["temperature"] = temperature
 
     try:
-        logger.info(f"Calling LLM ({settings.groq_model})")
+        logger.info(f"Calling LLM ({target_model})")
         response = client.chat.completions.create(**kwargs)
         content = response.choices[0].message.content
         return _clean_json_string(content)
+
     except Exception as e:
         err_msg = str(e)
         # Fallback: If Groq's strict json_object validation failed (HTTP 400 json_validate_failed),
@@ -60,7 +68,7 @@ def get_llm_response(prompt: str, system_prompt: str = None, response_format: di
             logger.warning(f"Groq json_object validation error ({e}). Retrying request without response_format constraint...")
             try:
                 kwargs_no_fmt = {
-                    "model": settings.groq_model,
+                    "model": target_model,
                     "messages": messages,
                 }
                 if temperature is not None:

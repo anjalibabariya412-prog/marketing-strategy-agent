@@ -23,11 +23,12 @@ SYSTEM_PROMPT = (
     "Do NOT use vague, generic fluff or one-size-fits-all phrases (e.g. 'high-quality, affordable solutions' or 'leveraging social media'). "
     "Name concrete tactics, messaging angles, and channels relevant to THIS specific business. Keep recommendations specific and useful — do NOT make the strategy generic to avoid assumptions.\n"
     "2. DISTINGUISH FACTS VS RECOMMENDATIONS NATURALLY (NO TAGS): You must clearly distinguish between facts and recommendations through your phrasing, but DO NOT use literal labels or prefixes like 'FACT:', 'RECOMMENDATION:', or 'ESTIMATE:'. Write naturally and professionally. "
-    "  - FACTS: Treat ONLY the explicit BUSINESS CONTEXT and KNOWN REQUIREMENTS as confirmed business facts. State them naturally as part of the narrative. "
+    "  - FACTS: Treat ONLY the explicit BUSINESS CONTEXT, PAST MARKETING DOCUMENT SUMMARY, and KNOWN REQUIREMENTS as confirmed business facts / owner-provided context. State them naturally as part of the narrative. "
     "  - RECOMMENDATIONS: Phrase your ideas using clear consultant language: 'should', 'could', 'consider', 'we recommend', 'an effective approach would be', etc. NEVER state a recommendation as if it were an existing fact or current practice. "
     "  For example, write 'Sweet Crumbs should consider partnering with local micro-influencers' — NEVER 'Sweet Crumbs works with micro-influencers'. Do not write 'RECOMMENDATION: Sweet Crumbs should...'\n"
     "3. NO INVENTED FACTS OR UNVERIFIED INFRASTRUCTURE:\n"
     "   - Only state something about the product, service, customers, results, or competitors as a fact if the business owner gave it in the context.\n"
+    "   - Information from the uploaded past marketing document summary is owner-provided context and should not automatically be treated as a verified marketing claim. If the document describes previous marketing activities or results, consider that information when generating recommendations. Avoid blindly repeating tactics described as unsuccessful.\n"
     "   - Never invent product capabilities, product features, customer behavior, marketing assets, historical performance, website traffic, customer lists, testimonials, reviews, conversion data, or existing systems.\n"
     "   - Never assume that a website, online store, e-commerce system, customer database, previous visitors, existing traffic, CRM, social-media audience, past campaigns, or analytics data exists unless the user explicitly provided it.\n"
     "   - Never present an assumption-dependent tactic as if its required infrastructure already exists.\n"
@@ -100,7 +101,9 @@ def generate_strategy(state: MarketingAgentState) -> MarketingStrategy:
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
         f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
+        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}",
     ]
+
 
     # Collect facts from KNOWN requirements
     known_reqs = [
@@ -136,6 +139,32 @@ def generate_strategy(state: MarketingAgentState) -> MarketingStrategy:
         prompt_parts.extend([
             "\nUNAVAILABLE INFORMATION (CLIENT DID NOT HAVE DATA):",
             "\n".join(unavailable_lines)
+        ])
+
+    if state.online_presence_context:
+        op = state.online_presence_context
+        op_lines = [f"Overall Summary: {op.overall_summary}"]
+
+        for src_name, src_obj in [
+            ("Website", op.website),
+            ("Instagram", op.instagram),
+            ("Facebook", op.facebook),
+            ("LinkedIn", op.linkedin)
+        ]:
+            if src_obj:
+                op_lines.append(f"{src_name} Summary: {src_obj.summary}")
+                if src_obj.relevant_products_or_services:
+                    op_lines.append(f"  {src_name} Products/Services: {', '.join(src_obj.relevant_products_or_services)}")
+                if src_obj.positioning_or_messaging:
+                    op_lines.append(f"  {src_name} Messaging: {', '.join(src_obj.positioning_or_messaging)}")
+                if src_obj.marketing_content:
+                    op_lines.append(f"  {src_name} Marketing Content: {', '.join(src_obj.marketing_content)}")
+                if src_obj.other_strategy_relevant_information:
+                    op_lines.append(f"  {src_name} Other Info: {', '.join(src_obj.other_strategy_relevant_information)}")
+
+        prompt_parts.extend([
+            "\nONLINE PRESENCE CONTEXT (SCRAPED FROM VERIFIED LINKS):",
+            "\n".join(op_lines)
         ])
 
     prompt_parts.append(

@@ -12,3 +12,7 @@ python-dotenv
 groq
 psycopg-binary
 langgraph-checkpoint-postgres
+
+pdfplumber
+python-multipart
+apify-client

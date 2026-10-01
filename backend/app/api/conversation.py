@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from typing import Optional
@@ -15,6 +16,9 @@ from backend.app.schemas.conversation import (
     ReplyResponse,
     StrategyResponse
 )
+from backend.app.services.url_parser import parse_website_social_links
+from backend.app.services.apify_service import scrape_parsed_urls
+from backend.app.services.online_presence_processor import process_online_presence
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +42,26 @@ def start_conversation(request: StartRequest):
             marketing_goal=request.marketing_goal,
             target_audience=request.target_audience,
             budget_resources=request.budget_resources,
-            current_marketing_channels=request.current_marketing_channels
+            current_marketing_channels=request.current_marketing_channels,
+            website_social_links=request.website_social_links,
+            past_marketing_document=request.past_marketing_document
         )
+
+        # Process online presence if website/social links are provided
+        online_presence_ctx = None
+        if request.website_social_links:
+            try:
+                parsed_urls = parse_website_social_links(request.website_social_links)
+                if parsed_urls:
+                    scraped_results = asyncio.run(scrape_parsed_urls(parsed_urls))
+                    online_presence_ctx = process_online_presence(scraped_results, context)
+            except Exception as e:
+                logger.error(f"Failed to process online presence for website_social_links: {e}")
 
         # 2. Create state and load requirements
         state = MarketingAgentState(
             business_context=context,
+            online_presence_context=online_presence_ctx,
             thread_id=thread_id
         )
         load_requirements_into_state(state)

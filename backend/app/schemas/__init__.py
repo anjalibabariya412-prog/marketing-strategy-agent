@@ -5,11 +5,14 @@ from .conversation import (
     ReplyResponse,
     StrategyResponse
 )
+from .pdf_extraction import PDFExtractionResponse
 
 __all__ = [
     "StartRequest",
     "StartResponse",
     "ReplyRequest",
     "ReplyResponse",
-    "StrategyResponse"
+    "StrategyResponse",
+    "PDFExtractionResponse"
 ]
+

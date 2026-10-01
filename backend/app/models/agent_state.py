@@ -5,6 +5,7 @@ from .business_context import BusinessContext
 from .information_requirement import InformationRequirement, RequirementStatus
 from .qa_turn import QATurn
 from .marketing_strategy import MarketingStrategy
+from .online_presence import OnlinePresenceContext
 
 
 class MarketingAgentState(BaseModel):
@@ -52,6 +53,10 @@ class MarketingAgentState(BaseModel):
     thread_id: Optional[str] = Field(
         default=None,
         description="Unique session/conversation thread identifier for state persistence and LangGraph checkpointing."
+    )
+    online_presence_context: Optional[OnlinePresenceContext] = Field(
+        default=None,
+        description="Structured summary of the client's online presence extracted from scraped website/social links."
     )
     final_strategy: Optional[MarketingStrategy] = Field(
         default=None,

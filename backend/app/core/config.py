@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,7 +13,7 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-20b"  # default if not set in .env
 
     # Maximum clarifying questions limit before forcing strategy generation
-    max_questions: int = 7
+    max_questions: int = 6
 
     # Flag to enable 1-call-per-turn optimization (merged answer processing + next question planning)
     merged_turn_call_enabled: bool = True
@@ -22,6 +23,13 @@ class Settings(BaseSettings):
 
     # Postgres Database settings
     database_url: str = "postgresql://postgres:postgres@localhost:5432/marketing_agent_db"
+
+    # Apify settings
+    apify_api_token: Optional[str] = None
+
+    @property
+    def apify_api_key(self) -> Optional[str]:
+        return self.apify_api_token
 
     # This tells Pydantic Settings where to find the .env file
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

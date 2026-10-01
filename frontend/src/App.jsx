@@ -25,10 +25,20 @@ function App() {
     target_audience: '',
     budget_resources: '',
     current_marketing_channels: '',
+    website_social_links: '',
   });
   const [formErrors, setFormErrors] = useState({});
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [startError, setStartError] = useState(null);
+
+  // PDF Document Upload State
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileUploading, setFileUploading] = useState(false);
+  const [pastMarketingDocText, setPastMarketingDocText] = useState(null);
+  const [fileUploadError, setFileUploadError] = useState(null);
+  const [fileUploadSuccess, setFileUploadSuccess] = useState(false);
+
+  const fileInputRef = useRef(null);
 
   // Question Wizard State
   const [threadId, setThreadId] = useState(null);
@@ -49,6 +59,64 @@ function App() {
   const [strategyError, setStrategyError] = useState(null);
 
   const answerTextareaRef = useRef(null);
+
+  // File Upload Handler
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setSelectedFile(file);
+    setFileUploading(true);
+    setFileUploadError(null);
+    setFileUploadSuccess(false);
+    setPastMarketingDocText(null);
+
+    const uploadFormData = new FormData();
+    uploadFormData.append('file', file);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/extract-pdf-text`, {
+        method: 'POST',
+        body: uploadFormData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const detailMsg = errorData && errorData.detail
+          ? (Array.isArray(errorData.detail) ? errorData.detail.map((d) => d.msg).join(', ') : errorData.detail)
+          : null;
+        throw new Error(detailMsg || `Server returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      setPastMarketingDocText(data.summary || null);
+      setFileUploadSuccess(true);
+
+    } catch (err) {
+      console.error('Failed to extract PDF text:', err);
+      setFileUploadError(err.message || 'Failed to process document. Please try a different file or proceed without one.');
+    } finally {
+      setFileUploading(false);
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setPastMarketingDocText(null);
+    setFileUploadError(null);
+    setFileUploadSuccess(false);
+    setFileUploading(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleViewPdf = () => {
+    if (!selectedFile) return;
+    const fileUrl = URL.createObjectURL(selectedFile);
+    window.open(fileUrl, '_blank');
+  };
+
 
   // Auto-focus textarea whenever a new question appears or question card is active
   useEffect(() => {
@@ -93,7 +161,7 @@ function App() {
 
   const handleStartSubmit = async (e) => {
     e.preventDefault();
-    if (formSubmitting) return;
+    if (formSubmitting || fileUploading) return;
 
     // Validate required fields (whitespace trimmed)
     const errors = {};
@@ -126,7 +194,11 @@ function App() {
       target_audience: formData.target_audience.trim(),
       budget_resources: formData.budget_resources.trim() || null,
       current_marketing_channels: formData.current_marketing_channels.trim() || null,
+      website_social_links: formData.website_social_links.trim() || null,
+      past_marketing_document: pastMarketingDocText || null,
     };
+
+
 
     try {
       const response = await fetch(`${API_BASE_URL}/start`, {
@@ -221,8 +293,8 @@ function App() {
   };
 
   const handleKeyDown = (e) => {
-    // Ctrl+Enter or Cmd+Enter submits the answer, Enter inserts a new line
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    // Enter key submits the answer; Shift+Enter inserts a new line
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!questionLoading && answerInput.trim()) {
         handleNextQuestion();
@@ -340,7 +412,7 @@ function App() {
 
               <div className="form-group">
                 <label className="form-label" htmlFor="current_marketing_channels">
-                  Which marketing channels are you currently using? (e.g., Instagram, Google Ads, Offline flyers) <span className="required-star">*</span>
+                  Which marketing channels do you want to use? (e.g., Instagram, Google Ads, Offline flyers) <span className="required-star">*</span>
                 </label>
                 <textarea
                   id="current_marketing_channels"
@@ -358,15 +430,93 @@ function App() {
                 )}
               </div>
 
+              <div className="form-group">
+                <label className="form-label" htmlFor="website_social_links">
+                  Website / Social Media Links (Optional)
+                </label>
+                <div className="field-helper">
+                  Add your website, Instagram, Facebook, LinkedIn, or other public links.
+                </div>
+                <textarea
+                  id="website_social_links"
+                  className="form-textarea"
+                  rows={3}
+                  value={formData.website_social_links}
+                  onChange={(e) => handleInputChange('website_social_links', e.target.value)}
+                  disabled={formSubmitting}
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Optional PDF File Upload Input */}
+              <div className="form-group">
+                <label className="form-label" htmlFor="past_marketing_doc">
+                  Have you done any marketing activities before? Upload your previous marketing plan, action plan, or campaign report (Optional)
+                </label>
+
+                {!selectedFile && (
+                  <input
+                    id="past_marketing_doc"
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    className={`file-input ${fileUploadError ? 'invalid' : ''}`}
+                    onChange={handleFileChange}
+                    disabled={formSubmitting || fileUploading}
+                  />
+                )}
+
+                {selectedFile && (
+                  <div className={`file-upload-status ${fileUploading ? 'loading' : fileUploadSuccess ? 'success' : 'error'}`}>
+                    <div className="file-info-group">
+                      {fileUploading && <span className="spinner-sm" />}
+                      {fileUploadSuccess && <span className="success-icon">✓</span>}
+                      <span className="file-name">{selectedFile.name}</span>
+                      {fileUploading && <span className="uploading-text">Uploading...</span>}
+                    </div>
+
+                    <div className="file-actions-group">
+                      {fileUploadSuccess && (
+                        <button
+                          type="button"
+                          className="btn-view-pdf"
+                          onClick={handleViewPdf}
+                        >
+                          View PDF
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-remove-file"
+                        onClick={handleRemoveFile}
+                        title="Remove file"
+                        aria-label="Remove uploaded file"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {fileUploadError && (
+                  <div className="field-footer">
+                    <div className="field-error">{fileUploadError}</div>
+                  </div>
+                )}
+              </div>
+
+
               {startError && <div className="error-banner">{startError}</div>}
 
               <button
                 type="submit"
                 className="btn-primary"
-                disabled={formSubmitting}
+                disabled={formSubmitting || fileUploading}
               >
-                {formSubmitting ? 'Starting...' : 'Start'}
+                {formSubmitting ? 'Starting...' : fileUploading ? 'Uploading File...' : 'Start'}
               </button>
+
+
             </form>
           </div>
         ) : (
@@ -417,7 +567,7 @@ function App() {
                     autoComplete="off"
                   />
                   <div className="keyboard-hint">
-                    Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to continue
+                    Press <kbd>Enter</kbd> to continue (or <kbd>Shift</kbd> + <kbd>Enter</kbd> for new line)
                   </div>
                 </div>
 

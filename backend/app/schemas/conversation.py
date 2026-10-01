@@ -42,6 +42,17 @@ class StartRequest(BaseModel):
         max_length=500,
         description="The marketing channels currently in use by the business."
     )
+    website_social_links: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        description="Website or social media links provided by the user."
+    )
+    past_marketing_document: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        description="Extracted or summarized text from a previous marketing plan or document uploaded by the user."
+    )
+
 
     @field_validator("company_name", "product_or_service", "marketing_goal", "target_audience", mode="before")
     @classmethod
@@ -61,13 +72,22 @@ class StartRequest(BaseModel):
             return stripped if stripped else None
         return v
 
-    @field_validator("current_marketing_channels", mode="before")
+    @field_validator("current_marketing_channels", "website_social_links", mode="before")
     @classmethod
     def strip_and_validate_current_marketing_channels(cls, v: Optional[str]) -> Optional[str]:
         if isinstance(v, str):
             stripped = v.strip()
             return stripped if stripped else None
         return v
+
+    @field_validator("past_marketing_document", mode="before")
+    @classmethod
+    def strip_and_validate_past_marketing_document(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            stripped = v.strip()
+            return stripped if stripped else None
+        return v
+
 
 
 

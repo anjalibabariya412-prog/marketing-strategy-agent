@@ -37,5 +37,16 @@ class BusinessContext(BaseModel):
         max_length=500,
         description="The marketing channels currently in use by the business (e.g., Instagram, Google Ads, offline flyers)."
     )
+    website_social_links: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        description="Website or social media links provided by the user."
+    )
+    past_marketing_document: Optional[str] = Field(
+        default=None,
+        description="Extracted or summarized text from a previous marketing plan or document uploaded by the owner."
+    )
+
+
 
 
