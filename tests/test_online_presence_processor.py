@@ -135,6 +135,61 @@ def test_online_presence_processor():
     assert res5 is None
     print("✓ Test 5 Passed: Empty input list returns None gracefully")
 
+    # -------------------------------------------------------------
+    # Test 6: Verify 12 Instagram target fields formatting & exclusions
+    # -------------------------------------------------------------
+    from backend.app.services.online_presence_processor import _format_instagram_item, _format_scraped_data_for_prompt
+
+    sample_insta_item = {
+        "caption": "Fresh baked cookies sale! #cookie #bakery @influencer",
+        "hashtags": ["cookie", "bakery"],
+        "mentions": ["influencer"],
+        "timestamp": "2026-10-05T12:00:00Z",
+        "likesCount": 450,
+        "ownerUsername": "cookiemanindia",
+        "ownerFullName": "Cookie Man India",
+        "type": "Video",
+        "videoViewCount": 1200,
+        "paidPartnership": False,
+        "taggedUsers": [{"username": "partner_brand"}],
+        "url": "https://instagram.com/p/C12345/",
+        # Excluded comment fields
+        "commentsCount": 45,
+        "latestComments": ["Great cookies!"],
+        "isCommentsDisabled": False,
+        # Excluded technical clutter
+        "displayUrl": "https://instagram.com/image.jpg",
+        "dimensions": {"height": 1080, "width": 1080}
+    }
+
+    formatted = _format_instagram_item(sample_insta_item)
+    assert "Author: Cookie Man India (@cookiemanindia)" in formatted
+    assert "Type: Video" in formatted
+    assert "Caption: Fresh baked cookies sale!" in formatted
+    assert "Hashtags: cookie, bakery" in formatted
+    assert "Mentions: influencer" in formatted
+    assert "Likes: 450" in formatted
+    assert "Video Views: 1200" in formatted
+    assert "Paid Partnership: False" in formatted
+    assert "Tagged Users: partner_brand" in formatted
+    assert "URL: https://instagram.com/p/C12345/" in formatted
+    assert "latestComments" not in formatted
+    assert "displayUrl" not in formatted
+    assert "commentsCount" not in formatted
+
+    insta_full_scrape = ApifyScrapeResult(
+        original_url="https://instagram.com/cookiemanindia",
+        normalized_url="https://instagram.com/cookiemanindia",
+        platform="instagram",
+        success=True,
+        data=[sample_insta_item],
+        error=None
+    )
+    prompt_text = _format_scraped_data_for_prompt([insta_full_scrape])
+    assert "--- PLATFORM: INSTAGRAM ---" in prompt_text
+    assert "Author: Cookie Man India" in prompt_text
+    print("✓ Test 6 Passed: Instagram 12-field extraction & exclusions verified")
+
     print("\n=== All Online Presence Processor Unit Tests Passed Successfully! ===")
 
 

@@ -1,5 +1,6 @@
 import os
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -7,38 +8,24 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.business_context import BusinessContext
-from backend.app.models.information_requirement import RequirementStatus
+from backend.app.models.business_context import BusinessContext, MarketingBudget
+from backend.app.models.marketing_strategy import MarketingStrategy
 from backend.app.core.requirements_library import load_requirements_into_state
 from backend.app.agent.strategy_generation import generate_strategy
 
 
-from unittest.mock import patch, MagicMock
-from backend.app.models.online_presence import OnlinePresenceContext, OnlineSourceSummary
-from backend.app.models.marketing_strategy import MarketingStrategy
-
-
-def test_strategy_generation():
-    print("=== Testing Task 7.2: Strategy Generation & OnlinePresenceContext Integration ===")
-
-    # Case 1: Without OnlinePresenceContext (Backward compatibility check)
-    state_no_op = MarketingAgentState(
+def test_strategy_generation_without_user_competitors():
+    state = MarketingAgentState(
         business_context=BusinessContext(
             company_name="CleanSeas Ocean Cleanup",
-            product_or_service="Free ocean plastic cleanup drives and community environmental workshops",
-            marketing_goal="Recruit 500 volunteer cleanup captains",
-            target_audience="Environmentally conscious college students aged 18-30",
-            budget_resources="$1,500 promotional budget and 2 full-time staff members."
+            product_or_service="Ocean plastic cleanup drives",
+            marketing_goal="Recruit 500 volunteers",
+            target_audience="College students aged 18-30",
+            budget_resources=MarketingBudget(amount=1500, currency="USD")
         )
     )
-    load_requirements_into_state(state_no_op)
+    load_requirements_into_state(state)
 
-    pain_req = state_no_op.get_requirement_by_id("customer_pain_points")
-    if pain_req:
-        pain_req.status = RequirementStatus.KNOWN
-        pain_req.value = "Students want to help the environment but lack structured local cleanup groups."
-
-    # Intercept LLM prompt to verify OnlinePresenceContext is NOT present in prompt when None
     captured_prompts = []
     def mock_llm_call(prompt, **kwargs):
         captured_prompts.append(prompt)
@@ -57,50 +44,46 @@ def test_strategy_generation():
         return mock_strategy.model_dump_json()
 
     with patch("backend.app.agent.strategy_generation.get_llm_response", side_effect=mock_llm_call):
-        strat_no_op = generate_strategy(state_no_op)
-        assert strat_no_op is not None
-        assert "ONLINE PRESENCE CONTEXT" not in captured_prompts[-1]
-        print("✓ Case 1 Passed: Strategy generation succeeds without OnlinePresenceContext")
+        strat = generate_strategy(state)
+        assert strat is not None
+        last_prompt = captured_prompts[-1]
+        assert "Competitors / Alternatives: Not provided" in last_prompt
+        assert "COMPETITOR RESEARCH CONTEXT" not in last_prompt
 
-    # Case 2: With OnlinePresenceContext (Integration check)
-    op_ctx = OnlinePresenceContext(
-        overall_summary="CleanSeas has a strong Instagram visual footprint showing active beach cleanup events.",
-        website=OnlineSourceSummary(
-            summary="CleanSeas official portal with event registration and cleanup captain guides.",
-            relevant_products_or_services=["Beach Cleanup Drives", "Captain Toolkit"],
-            positioning_or_messaging=["Join the wave of ocean restoration."]
-        ),
-        instagram=OnlineSourceSummary(
-            summary="Active Instagram page with 12k followers showcasing weekly cleanup photos.",
-            marketing_content=["Weekly cleanup highlights", "Volunteer spotlight posts"],
-            positioning_or_messaging=["#CleanSeasCaptains"]
+
+def test_strategy_generation_with_user_provided_competitors():
+    state = MarketingAgentState(
+        business_context=BusinessContext(
+            company_name="Homemade Meals",
+            product_or_service="Daily fresh tiffin service",
+            marketing_goal="Acquire 100 monthly subscribers",
+            target_audience="Working professionals in IT hubs",
+            budget_resources=MarketingBudget(amount=50000, currency="INR"),
+            competitors=["Brand A", "Brand B"]
         )
     )
+    load_requirements_into_state(state)
 
-    state_with_op = MarketingAgentState(
-        business_context=BusinessContext(
-            company_name="CleanSeas Ocean Cleanup",
-            product_or_service="Free ocean plastic cleanup drives and community environmental workshops",
-            marketing_goal="Recruit 500 volunteer cleanup captains",
-            target_audience="Environmentally conscious college students aged 18-30",
-            budget_resources="$1,500 promotional budget and 2 full-time staff members."
-        ),
-        online_presence_context=op_ctx
-    )
-    load_requirements_into_state(state_with_op)
+    captured_prompts = []
+    def mock_llm_call(prompt, **kwargs):
+        captured_prompts.append(prompt)
+        mock_strategy = MarketingStrategy(
+            business_overview="Homemade Meals provides fresh tiffin service.",
+            target_audience_insights="Working IT professionals in tech parks.",
+            competitive_positioning="Homemade Meals positions against Brand A and Brand B by offering daily home-style subscription meals.",
+            value_proposition="Fresh, hygienic home-style daily tiffin delivered directly to office desks.",
+            marketing_channels_and_tactics="WhatsApp marketing and tech park flyer distribution.",
+            customer_acquisition_approach="Free trial lunch boxes distributed at IT hub offices.",
+            budget_considerations="₹50,000 allocated for flyer distribution (₹10,000) and trial boxes (₹40,000).",
+            kpis="Acquire 100 subscribers at ₹500 CPA.",
+            action_plan="Week 1: Office flyer distribution. Week 2: Trial lunch box delivery.",
+            additional_sections={"Assumptions to Verify": "Assuming ₹500 CPA based on trial box conversion rate."}
+        )
+        return mock_strategy.model_dump_json()
 
     with patch("backend.app.agent.strategy_generation.get_llm_response", side_effect=mock_llm_call):
-        strat_with_op = generate_strategy(state_with_op)
-        assert strat_with_op is not None
+        strat = generate_strategy(state)
+        assert strat is not None
         last_prompt = captured_prompts[-1]
-        assert "ONLINE PRESENCE CONTEXT" in last_prompt
-        assert "CleanSeas official portal with event registration" in last_prompt
-        assert "#CleanSeasCaptains" in last_prompt
-        print("✓ Case 2 Passed: Strategy generation receives and includes OnlinePresenceContext in LLM prompt")
-
-    print("\n=== All Strategy Generation & OnlinePresenceContext Verification Tests Passed Successfully! ===")
-
-
-if __name__ == "__main__":
-    test_strategy_generation()
-
+        assert "Competitors / Alternatives: Brand A, Brand B" in last_prompt
+        assert "PUBLIC WEB RESEARCH" not in last_prompt

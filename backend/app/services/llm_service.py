@@ -30,11 +30,12 @@ def get_llm_response(
     system_prompt: str = None,
     response_format: dict = None,
     temperature: float = None,
-    model: str = None
+    model: str = None,
+    max_tokens: int = None
 ) -> str:
     """
     Sends a prompt to the Groq LLM and returns the response text.
-    Supports optional model override, response_format (e.g. {"type": "json_object"}), and temperature.
+    Supports optional model override, response_format (e.g. {"type": "json_object"}), temperature, and max_tokens.
     Includes fallback retry if Groq's strict server-side json_object validation fails.
     """
     target_model = model or settings.groq_model
@@ -53,11 +54,21 @@ def get_llm_response(
         kwargs["response_format"] = response_format
     if temperature is not None:
         kwargs["temperature"] = temperature
+    if max_tokens is not None:
+        kwargs["max_completion_tokens"] = max_tokens
 
     try:
         logger.info(f"Calling LLM ({target_model})")
         response = client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
+        choice = response.choices[0]
+        content = choice.message.content
+
+        logger.info(
+            "LLM response finish_reason=%s | content_length=%s",
+            choice.finish_reason,
+            len(content or "")
+        )
+
         return _clean_json_string(content)
 
     except Exception as e:
@@ -74,9 +85,17 @@ def get_llm_response(
                 if temperature is not None:
                     kwargs_no_fmt["temperature"] = temperature
                 response = client.chat.completions.create(**kwargs_no_fmt)
-                content = response.choices[0].message.content
+                choice = response.choices[0]
+                content = choice.message.content
+
+                logger.info(
+                    "LLM response finish_reason=%s | content_length=%s",
+                    choice.finish_reason,
+                    len(content or "")
+                )
+
                 return _clean_json_string(content)
             except Exception as retry_err:
                 raise LLMServiceError(f"Failed to get response from LLM on fallback retry: {retry_err}") from retry_err
 
-        raise LLMServiceError(f"Failed to get response from LLM: {e}") from e
+        raise LLMServiceError(f"Failed to get response from LLM: {e}") from e

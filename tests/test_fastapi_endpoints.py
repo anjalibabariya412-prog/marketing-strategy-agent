@@ -25,7 +25,7 @@ def test_fastapi_endpoints():
         "product_or_service": "ocean plastic cleanup drives",
         "marketing_goal": "recruit 500 volunteer cleanup captains",
         "target_audience": "college students aged 18-30",
-        "budget_resources": "$2,000 promotional budget",
+        "budget_resources": {"amount": 2000, "currency": "USD"},
         "website_social_links": "https://cleanseas.org\nhttps://instagram.com/cleanseas"
     }
     res_start = client.post("/start", json=start_payload)

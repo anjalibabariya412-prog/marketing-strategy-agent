@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["PDF Extraction"])
 
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB limit in bytes
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB limit in bytes
 MIN_CHARACTER_COUNT = 50
 SUMMARIZATION_THRESHOLD = 1000
 MAX_SUMMARY_LEN = 2000
@@ -34,7 +34,7 @@ async def extract_pdf_text(file: UploadFile = File(...)):
             detail="Uploaded file must be a PDF document (content-type must be 'application/pdf' or file extension must be '.pdf')."
         )
 
-    # Validation step 3b: Safely read file size and check 5 MB limit
+    # Validation step 3b: Safely read file size and check 10 MB limit
     try:
         contents = await file.read()
     except Exception as e:
@@ -47,7 +47,7 @@ async def extract_pdf_text(file: UploadFile = File(...)):
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File size exceeds the maximum limit of 5 MB."
+            detail="File size exceeds the maximum limit of 10 MB."
         )
 
     # Validation step 3c: Open and parse PDF with pdfplumber

@@ -29,6 +29,7 @@ def analyze_node(state: MarketingAgentState) -> MarketingAgentState:
             state.analysis_done = True
     else:
         logger.info("Graph Node [analyze]: Skipping analyze_relevance() because analysis_done is True")
+
     return state
 
 
@@ -50,7 +51,7 @@ def route_after_analyze(state: MarketingAgentState) -> str:
 
 def ask_node(state: MarketingAgentState) -> MarketingAgentState:
     """
-    Graph Node: Generates question if needed (using pending question if available),
+    Graph Node: Serves pending question or prepares next question if needed,
     pauses for user answer via interrupt(), and processes the user's answer upon resumption.
     """
     logger.info(
@@ -59,13 +60,13 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
         f"pending_req: '{state.pending_requirement_id}'"
     )
 
-    # 1. Prepare next question if one is not already pending (e.g. first time or after answer processing)
+    # 1. Promote pending question if present and valid, otherwise prepare next question if no active question exists
     if not state.current_question or not state.active_requirement_id:
         if state.pending_question and state.pending_requirement_id:
             pending_req = state.get_requirement_by_id(state.pending_requirement_id)
             asked_ids = {turn.requirement_id for turn in state.qa_history if turn.requirement_id} if state.qa_history else set()
             if pending_req and pending_req.status == RequirementStatus.UNKNOWN and pending_req.id not in asked_ids:
-                logger.info(f"Graph Node [ask]: Using pre-planned pending question for requirement '{state.pending_requirement_id}'")
+                logger.info(f"Graph Node [ask]: Using pending question for requirement '{state.pending_requirement_id}'")
                 state.current_question = state.pending_question
                 state.active_requirement_id = state.pending_requirement_id
                 state.pending_question = None
@@ -97,7 +98,7 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
         "requirement_id": state.active_requirement_id
     })
 
-    # 3. Resumed: Process the user answer and optionally plan next question in one call
+    # 3. Resumed with user answer: Process the user's answer immediately FIRST
     if user_answer:
         if settings.merged_turn_call_enabled:
             logger.info(f"Graph Node [ask]: Resumed with answer -> Calling process_answer_and_plan_next()")
@@ -105,6 +106,16 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
         else:
             logger.info(f"Graph Node [ask]: Resumed with answer -> Calling process_answer_for_requirement()")
             process_answer_for_requirement(state, str(user_answer))
+
+        # Ensure next question is populated as pending if answer processing did not populate pending fields
+        if not state.pending_question or not state.pending_requirement_id:
+            logger.info("Graph Node [ask]: Post-answer processing pending question missing -> Calling prepare_next_question()")
+            prepare_next_question(state)
+            if state.current_question and state.active_requirement_id:
+                state.pending_question = state.current_question
+                state.pending_requirement_id = state.active_requirement_id
+                state.current_question = None
+                state.active_requirement_id = None
 
     return state
 

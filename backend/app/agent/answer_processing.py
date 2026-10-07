@@ -1,10 +1,16 @@
 import json
 import logging
-from typing import Optional
+from typing import Optional, List
 
+from backend.app.core.config import settings
 from backend.app.models.agent_state import MarketingAgentState
 from backend.app.models.business_context import BusinessContext
-from backend.app.models.information_requirement import RequirementStatus
+from backend.app.models.information_requirement import (
+    RequirementStatus,
+    create_dynamic_requirement,
+    is_duplicate_requirement,
+)
+from backend.app.models.online_presence import format_online_presence_context
 from backend.app.models.qa_turn import QATurn
 from backend.app.services.llm_service import get_llm_response, LLMServiceError
 
@@ -29,10 +35,10 @@ ANSWER_CLASSIFICATION_SYSTEM_PROMPT = (
     "1. The ACTIVE requirement being asked about (ID, title, description, and exact question asked).\n"
     "2. A list of OTHER currently missing candidate requirements (ID, title, description).\n"
     "3. The client's response message.\n\n"
-    "CRITICAL PRICING MODEL RULE:\n"
+    "CRITICAL PRICING & OFFER RULE:\n"
     "- Use the semantic meaning and conversation context of the user's answer, NOT just the presence of a monetary value.\n"
-    "- pricing_model = the price and payment structure of the product or service being sold to customers (e.g., product price, service fee, monthly subscription, yearly subscription, one-time payment, packages).\n"
-    "- If the active requirement is pricing_model but the user's answer refers to internal marketing spend/budget rather than product pricing, set active_requirement status to 'unavailable' (value: null).\n\n"
+    "- pricing_offer_structure = the commercial structure, pricing, prices, tiers, fees, or packages of the product or service being sold to customers.\n"
+    "- If the active requirement is pricing_offer_structure but the user's answer refers to internal marketing spend/budget rather than product/service pricing, set active_requirement status to 'unavailable' (value: null).\n\n"
     "Your tasks:\n"
     "TASK 1 - EVALUATE ACTIVE REQUIREMENT:\n"
     "- Classify the client's answer for the ACTIVE requirement as 'known' (if they provided concrete information for it) or 'unavailable' (if they indicated they don't know, haven't decided, or did not answer it).\n"
@@ -68,10 +74,16 @@ _ANSWER_RULES = ANSWER_CLASSIFICATION_SYSTEM_PROMPT.split("OUTPUT FORMAT:")[0].s
 
 _PRIORITIZATION_SECTION = (
     "REQUIREMENT SELECTION PRIORITIZATION RULES:\n"
-    "1. Must-have requirements (Must Have: Yes) should generally be prioritized over optional ones.\n"
-    "2. However, do NOT simply pick the first must-have item blindly. Reason about which specific requirement provides the highest immediate value or clarity for THIS specific business and its current context.\n"
-    "3. Occasionally, a non-must-have requirement (Must Have: No) may be unusually urgent or foundational for a particular business situation. You may pick a non-must-have item if you clearly reason why it is more critical right now than the remaining must-haves.\n"
-    "4. Do NOT select a requirement for 'next' if it is already adequately covered by the business context or past marketing document summary."
+    "1. Prefer selecting an existing UNKNOWN candidate requirement ID from the provided candidate list.\n"
+    "2. ONLY IF no remaining candidate requirement covers an important strategic information gap for this specific business, you may propose creating ONE dynamic requirement using 'create_dynamic'.\n"
+    "3. Priority items (target_market_location, customer_needs_buying_behavior, competitive_landscape, usp_differentiation, pricing_offer_structure, sales_conversion_journey) should be evaluated systematically.\n"
+    "4. GROUNDEDNESS & NO DUPLICATE RULE:\n"
+    "   - Do NOT select a requirement if its information is already adequately covered by business context, past marketing document summary, online presence context (website/social media scrape), or previous user answers.\n"
+    "   - PRIORITY / CONFLICT RULE: User-provided explicit information strictly overrides scraped online presence information if they conflict.\n"
+    "   - Do NOT ask for information already covered by online presence context (e.g. product features/USP, pricing, or current marketing channels).\n"
+    "5. DYNAMIC REQUIREMENT CREATION RULES:\n"
+    "   - Do NOT create a dynamic requirement if an existing requirement covers the topic, if nice-to-have, if already known, or if rephrasing an existing requirement.\n"
+    "   - Create a dynamic requirement ONLY when: strategically important + genuinely missing + specific to this business + not covered by existing requirements."
 )
 
 _QUESTION_PHRASING_RULES = QUESTION_GEN_SYSTEM_PROMPT.split("9. OUTPUT FORMAT:")[0].strip()
@@ -93,16 +105,91 @@ MERGED_TURN_SYSTEM_PROMPT = (
     '      "value": "<concise extracted value string>"\n'
     "    }\n"
     "  ],\n"
-    '  "next": {\n'
-    '    "selected_id": "<requirement_id>",\n'
+    '  "next": null OR {\n'
+    '    "selected_id": "<existing_requirement_id from candidates list or null>",\n'
+    '    "create_dynamic": null OR {"id": "<short_id>", "title": "<Title>", "description": "<Desc>"},\n'
     '    "question": "<short direct conversational question>",\n'
-    '    "reasoning": "<short explanation of why this requirement was selected next>"\n'
+    '    "reasoning": "<short explanation>"\n'
     "  }\n"
     "}\n"
-    "IMPORTANT FOR 'next': 'selected_id' MUST be chosen ONLY from candidate requirements that remain UNKNOWN after applying the active and incidentally answered requirements. If no candidate requirements remain UNKNOWN, set 'next' to null.\n"
+    "IMPORTANT FOR 'next': Choose 'selected_id' from remaining UNKNOWN candidate requirements, OR use 'create_dynamic' if an uncovered strategic gap exists. If no further questions are needed, set 'next' to null.\n"
     "Do NOT include markdown formatting or commentary outside the JSON object."
 )
 
+
+
+COMPETITOR_EXTRACTION_SYSTEM_PROMPT = (
+    "You are an expert marketing strategy assistant extracting competitor names and market alternatives from a client's response.\n\n"
+    "RULES:\n"
+    "1. Extract ONLY competitor names, company names, brand names, or alternative solutions/options explicitly mentioned in the user's text.\n"
+    "2. Do NOT invent, fabricate, or assume any company names, brand names, or competitors not present in the user's input.\n"
+    "3. If the user mentions generic or unnamed competitors (e.g., 'two local tiffin services', 'other accounting firms', 'local bakeries'), preserve the user's exact descriptive wording as an item in the list.\n"
+    "4. If the user explicitly states they have no competitors or direct alternatives (e.g., 'No competitors', 'We have no direct competitors', 'None'), return an empty list: [].\n"
+    "5. Avoid duplicate competitor names (case-insensitive).\n"
+    "6. Output MUST be a JSON object with key 'competitors': list of strings.\n\n"
+    "Example 1:\n"
+    "User answer: \"Swiggy, Zomato and two local tiffin services\"\n"
+    "Output: {\"competitors\": [\"Swiggy\", \"Zomato\", \"two local tiffin services\"]}\n\n"
+    "Example 2:\n"
+    "User answer: \"We don't have any direct competitors in our area.\"\n"
+    "Output: {\"competitors\": []}"
+)
+
+
+def extract_competitors(user_answer: str) -> List[str]:
+    """
+    Extracts structured competitor names/alternatives from a natural language user response using LLM.
+    Preserves exact user wording when a competitor cannot be named specifically (e.g. 'two local tiffin services').
+    Avoids duplicate names and returns [] if the user states they have no competitors or if none are present.
+    """
+    if not user_answer or not user_answer.strip():
+        return []
+
+    user_prompt = f"USER ANSWER:\n\"{user_answer.strip()}\"\n\nExtract competitor names or alternatives and return the JSON object."
+
+    try:
+        raw_response = get_llm_response(
+            prompt=user_prompt,
+            system_prompt=COMPETITOR_EXTRACTION_SYSTEM_PROMPT,
+            response_format={"type": "json_object"}
+        )
+
+        data = json.loads(raw_response)
+        extracted = data.get("competitors", [])
+        if not isinstance(extracted, list):
+            return []
+
+        clean_list = []
+        seen = set()
+        for item in extracted:
+            if isinstance(item, str) and item.strip():
+                clean_item = item.strip()
+                lower_item = clean_item.lower()
+                if lower_item not in seen:
+                    seen.add(lower_item)
+                    clean_list.append(clean_item)
+
+        return clean_list
+
+    except (LLMServiceError, json.JSONDecodeError, Exception) as e:
+        logger.error(f"extract_competitors failed: {e}. Returning empty list.")
+        return []
+
+
+def update_state_competitors(state: MarketingAgentState, competitor_list: List[str]) -> None:
+    """
+    Appends new non-duplicate competitor names to state.business_context.competitors.
+    """
+    if not competitor_list:
+        return
+
+    existing_set = {c.lower() for c in state.business_context.competitors}
+    for comp in competitor_list:
+        if comp and comp.strip():
+            clean = comp.strip()
+            if clean.lower() not in existing_set:
+                existing_set.add(clean.lower())
+                state.business_context.competitors.append(clean)
 
 
 def extract_initial_context(user_message: str) -> BusinessContext:
@@ -130,6 +217,9 @@ def extract_initial_context(user_message: str) -> BusinessContext:
             marketing_goal=data.get("marketing_goal"),
             target_audience=data.get("target_audience")
         )
+        comps = extract_competitors(user_message)
+        if comps:
+            context.competitors = comps
         logger.info(f"Extracted initial context: {context.model_dump()}")
         return context
 
@@ -209,6 +299,11 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
             req.value = final_value
             logger.info(f"Requirement [{active_req_id}] updated to {final_status.value} with value: {final_value}")
 
+        if active_req_id in ("competitive_landscape", "competitors") or "competitor" in str(active_req_id).lower():
+            comps = extract_competitors(user_answer)
+            if comps:
+                update_state_competitors(state, comps)
+
         # 2. Process INCIDENTALLY KNOWN requirements
         incidentals = data.get("incidentally_known_requirements", [])
         if isinstance(incidentals, list):
@@ -222,6 +317,10 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
                             inc_req.status = RequirementStatus.KNOWN
                             inc_req.value = str(inc_val).strip()
                             logger.info(f"Requirement [{inc_id}] incidentally updated to KNOWN with value: {inc_val}")
+                            if inc_id in ("competitive_landscape", "competitors") or "competitor" in str(inc_id).lower():
+                                inc_comps = extract_competitors(str(inc_val))
+                                if inc_comps:
+                                    update_state_competitors(state, inc_comps)
 
         # 3. Record single QATurn in qa_history for the actual turn
         qa_turn = QATurn(
@@ -290,6 +389,10 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
         f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
         f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}",
     ]
+
+    op_str = format_online_presence_context(state.online_presence_context)
+    if op_str:
+        context_lines.append(f"\nONLINE PRESENCE CONTEXT (scraped/verified website & social media sources):\n{op_str}")
 
 
     # Include resolved requirements status and values (both KNOWN and UNAVAILABLE)
@@ -389,6 +492,11 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
             req.status = final_status
             req.value = final_value
 
+        if active_req_id in ("competitive_landscape", "competitors") or "competitor" in str(active_req_id).lower():
+            comps = extract_competitors(user_answer)
+            if comps:
+                update_state_competitors(state, comps)
+
         # Process incidental requirements
         incidental_ids = []
         incidentals = data.get("incidentally_known_requirements", [])
@@ -403,6 +511,10 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
                             inc_req.status = RequirementStatus.KNOWN
                             inc_req.value = str(inc_val).strip()
                             incidental_ids.append(inc_id)
+                            if inc_id in ("competitive_landscape", "competitors") or "competitor" in str(inc_id).lower():
+                                inc_comps = extract_competitors(str(inc_val))
+                                if inc_comps:
+                                    update_state_competitors(state, inc_comps)
 
         # Record exactly ONE QATurn for the actual answered turn
         qa_turn = QATurn(
@@ -423,22 +535,49 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
         next_q = None
 
         if isinstance(next_obj, dict):
-            proposed_id = next_obj.get("selected_id")
+            proposed_action = str(next_obj.get("action", "")).lower()
             proposed_q = next_obj.get("question")
-            if proposed_id and proposed_q and isinstance(proposed_id, str) and isinstance(proposed_q, str):
-                proposed_q_clean = proposed_q.strip().strip('"').strip("'").strip()
-                target_req = state.get_requirement_by_id(proposed_id)
-                # Validation: must be a requirement that is STILL UNKNOWN after updates and NOT in already_asked_or_resolved_ids
-                if (
-                    target_req 
-                    and target_req.status == RequirementStatus.UNKNOWN 
-                    and proposed_id not in already_asked_or_resolved_ids
-                    and proposed_id not in incidental_ids
-                ):
-                    if 0 < len(proposed_q_clean) <= 300:
+            proposed_q_clean = (
+                proposed_q.strip().strip('"').strip("'").strip()
+                if isinstance(proposed_q, str)
+                else None
+            )
+
+            # Check question limit
+            if len(state.qa_history) < settings.max_questions and proposed_q_clean and 0 < len(proposed_q_clean) <= 300:
+                proposed_id = next_obj.get("selected_id")
+                create_dyn = next_obj.get("create_dynamic")
+
+                if proposed_id and isinstance(proposed_id, str) and proposed_id != "none":
+                    target_req = state.get_requirement_by_id(proposed_id)
+                    if (
+                        target_req 
+                        and target_req.status == RequirementStatus.UNKNOWN 
+                        and proposed_id not in already_asked_or_resolved_ids
+                        and proposed_id not in incidental_ids
+                    ):
                         valid_next = True
                         selected_id = target_req.id
                         next_q = proposed_q_clean
+                elif isinstance(create_dyn, dict):
+                    dyn_id = create_dyn.get("id")
+                    dyn_title = create_dyn.get("title")
+                    dyn_desc = create_dyn.get("description")
+                    if dyn_id and dyn_title and dyn_desc:
+                        if not is_duplicate_requirement(dyn_id, dyn_title, state.requirements):
+                            dyn_req = create_dynamic_requirement(
+                                raw_id=dyn_id,
+                                title=dyn_title,
+                                description=dyn_desc,
+                                is_must_have=True
+                            )
+                            state.requirements.append(dyn_req)
+                            valid_next = True
+                            selected_id = dyn_req.id
+                            next_q = proposed_q_clean
+                            logger.info(f"Created & planned dynamic requirement '{dyn_req.id}' in merged turn.")
+                        else:
+                            logger.info(f"Proposed dynamic requirement [{dyn_id}] in merged turn was duplicate. Skipping.")
 
         if valid_next:
             state.pending_requirement_id = selected_id

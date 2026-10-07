@@ -3,7 +3,13 @@ import logging
 import re
 from backend.app.core.config import settings
 from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.information_requirement import InformationRequirement, RequirementStatus
+from backend.app.models.information_requirement import (
+    InformationRequirement,
+    RequirementStatus,
+    create_dynamic_requirement,
+    is_duplicate_requirement,
+)
+from backend.app.models.online_presence import format_online_presence_context
 from backend.app.services.llm_service import get_llm_response, LLMServiceError
 
 logger = logging.getLogger(__name__)
@@ -22,8 +28,10 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
     if not missing_reqs:
         return True
 
-    # Build business context summary
+    # Build business context summary including past marketing document and online presence context
     ctx = state.business_context
+    op_str = format_online_presence_context(state.online_presence_context)
+
     context_str = (
         f"Company Name: {ctx.company_name or 'Not provided'}\n"
         f"Product/Service: {ctx.product_or_service or 'Not provided'}\n"
@@ -31,7 +39,8 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
         f"Target Audience: {ctx.target_audience or 'Not provided'}\n"
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}\n"
         f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}\n"
-        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}"
+        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}\n"
+        f"Online presence context (scraped/verified from website & social media): {op_str or 'Not provided'}"
     )
 
     # Format missing requirements for LLM evaluation including Must Have flag
@@ -47,49 +56,46 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
 
     reqs_str = "\n".join(reqs_formatted)
 
-    # Construct system prompt based on extra_requirement_enabled flag
-    base_prompt = (
+    system_prompt = (
         "You are an expert marketing strategy consultant analyzing information requirements for a business.\n"
-        "Your goal is to evaluate missing marketing requirements against the known business context and past marketing document summary.\n"
-        "Based ONLY on the known business context and past marketing document summary (do NOT guess user answers or invent information), determine if each "
-        "requirement is relevant for this specific business.\n\n"
-        "Mark a requirement as:\n"
-        "- 'not_relevant': IF the business's fundamental nature explicitly makes this requirement inapplicable "
-        "(e.g., 'pricing_model' for a free, donation-funded non-profit, or 'physical retail foot traffic' for a pure digital SaaS), "
-        "OR IF the previous marketing document summary already contains enough clear information about that requirement so it does not need to be asked again.\n"
-        "- 'still_relevant': IF the requirement could reasonably apply to this business, even if the answer is currently unknown.\n\n"
+        "Your goal is to evaluate missing marketing requirements against the known business context, past marketing document summary, "
+        "and online presence context (scraped/verified from website and social media sources).\n\n"
+        "CRITICAL RELEVANCE RULE — DO NOT MARK EVERYTHING RELEVANT:\n"
+        "For every requirement, ask: 'Would knowing this information materially help create the marketing strategy for THIS specific business?'\n"
+        "Do NOT mark every predefined requirement as relevant simply because it is in the library or generally useful for marketing.\n"
+        "- If NO: Mark as 'not_relevant' (e.g. subscription_model or recurring sales cycle for a physical footwear store or single-purchase retail business).\n"
+        "- If YES and information is ALREADY available in business context, past marketing document, or online presence: Mark as 'known' and provide a concise summary as 'value'.\n"
+        "- If YES but information is missing: Keep as 'still_relevant'.\n\n"
+        "IMPORTANT GROUNDEDNESS RULES:\n"
+        "1. Only mark a requirement as 'known' or 'not_relevant' based on facts when the context explicitly supports it. Do NOT infer unsupported facts.\n"
+        "2. TARGET MARKET LOCATION RULE: Do NOT infer the target market location merely from a business address, phone number, Instagram bio location, website domain, or city mentioned in a post. Target market location must be explicitly stated.\n\n"
+        "DYNAMIC REQUIREMENT CREATION RULE:\n"
+        "After evaluating existing requirements, perform a second check:\n"
+        "'Is there an important piece of information needed for this specific business's marketing strategy that NONE of the existing requirements represents?'\n"
+        "- If NO: Set 'dynamic_requirement' to null.\n"
+        "- If YES: Create exactly ONE meaningful dynamic requirement for the most important uncovered strategic gap.\n"
+        "ANTI-OVERGENERATION RULES FOR DYNAMIC REQUIREMENTS:\n"
+        "Do NOT create a dynamic requirement:\n"
+        "- just because an existing requirement could be phrased differently\n"
+        "- when an existing requirement already covers the information\n"
+        "- just to increase the number of questions\n"
+        "- for information that is merely nice-to-have\n"
+        "- when the information is already known\n"
+        "- when the information is not strategically important\n"
+        "Create a dynamic requirement ONLY when: strategically important + genuinely missing + specific to this business + not covered by any existing requirement.\n\n"
+        "You MUST respond ONLY with a JSON object conforming strictly to this structure:\n"
+        "{\n"
+        '  "results": [\n'
+        '    {"id": "<requirement_id>", "relevance": "still_relevant" | "not_relevant" | "known", "value": "<extracted string if known, else null>"}\n'
+        '  ],\n'
+        '  "dynamic_requirement": null OR {\n'
+        '    "id": "<short_unique_id>",\n'
+        '    "title": "<Clear Title>",\n'
+        '    "description": "<Concise description of strategic gap>"\n'
+        '  }\n'
+        "}\n"
+        "Do NOT include markdown formatting or commentary outside the JSON object."
     )
-
-    if settings.extra_requirement_enabled:
-        system_prompt = (
-            base_prompt +
-            "EXTRA REQUIREMENT: the fixed list may miss a topic that matters a lot for this business's "
-            "marketing strategy, beyond what the business context and past marketing document summary already cover. "
-            "Default to null; most businesses need none. Propose one only if: (a) it strongly shapes the strategy "
-            "for this business, (b) nothing in the fixed list, the business context, or the past marketing document "
-            "summary already covers it, (c) it is not the product's own price and not the marketing budget. "
-            "Invent a short lowercase snake_case id, a short title, and a one or two sentence neutral description "
-            "that works for any kind of audience (customers, patients, donors, members). Never propose more than one.\n\n"
-            "You MUST respond ONLY with a JSON object conforming strictly to this structure:\n"
-            "{\n"
-            '  "results": [\n'
-            '    {"id": "<requirement_id>", "relevance": "still_relevant" | "not_relevant"}\n'
-            '  ],\n'
-            '  "extra_requirement": null OR {"id": "<id>", "title": "<title>", "description": "<description>", "reasoning": "<reasoning>"}\n'
-            "}\n"
-            "Do NOT include markdown formatting or commentary outside the JSON object."
-        )
-    else:
-        system_prompt = (
-            base_prompt +
-            "You MUST respond ONLY with a JSON object conforming strictly to this structure:\n"
-            "{\n"
-            '  "results": [\n'
-            '    {"id": "<requirement_id>", "relevance": "still_relevant" | "not_relevant"}\n'
-            '  ]\n'
-            "}\n"
-            "Do NOT include markdown formatting or commentary outside the JSON object."
-        )
 
     user_prompt = (
         f"BUSINESS CONTEXT:\n{context_str}\n\n"
@@ -110,50 +116,39 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
         for item in results:
             if isinstance(item, dict):
                 req_id = item.get("id")
-                relevance = item.get("relevance")
+                relevance = item.get("relevance") or item.get("status")
+                val = item.get("value")
 
-                if relevance == "not_relevant" and req_id:
+                if req_id:
                     target_req = state.get_requirement_by_id(req_id)
                     if target_req:
-                        target_req.status = RequirementStatus.NOT_RELEVANT
+                        if relevance == "not_relevant":
+                            target_req.status = RequirementStatus.NOT_RELEVANT
+                            logger.info(f"Requirement [{req_id}] marked NOT_RELEVANT by gap analysis.")
+                        elif relevance == "known":
+                            target_req.status = RequirementStatus.KNOWN
+                            if val:
+                                target_req.value = str(val).strip()
+                            logger.info(f"Requirement [{req_id}] marked KNOWN by gap analysis with value: {val}")
 
-        # Handle optional extra_requirement if enabled
-        if settings.extra_requirement_enabled:
-            extra_req = data.get("extra_requirement")
-            if not extra_req or not isinstance(extra_req, dict):
-                logger.info("Extra requirement: none")
-            else:
-                extra_id = extra_req.get("id")
-                extra_title = extra_req.get("title")
-                extra_desc = extra_req.get("description")
-
-                rejection_reason = None
-                if not extra_id or not isinstance(extra_id, str) or not ID_REGEX.match(extra_id.strip()):
-                    rejection_reason = "invalid id format"
-                elif not extra_title or not isinstance(extra_title, str) or not (0 < len(extra_title.strip()) <= 60):
-                    rejection_reason = "invalid title"
-                elif not extra_desc or not isinstance(extra_desc, str) or not (0 < len(extra_desc.strip()) <= 300):
-                    rejection_reason = "invalid description"
-                elif any(r.is_custom for r in state.requirements):
-                    rejection_reason = "custom requirement limit reached"
-                elif len(state.get_unresolved_must_haves()) + 1 > settings.max_questions:
-                    rejection_reason = "exceeds max_questions limit"
-
-                if rejection_reason:
-                    logger.info(f"Extra requirement: rejected: {rejection_reason}")
-                else:
-                    clean_id = extra_id.strip()
-                    new_req = InformationRequirement(
-                        id=clean_id,
-                        title=extra_title.strip(),
-                        description=extra_desc.strip(),
-                        status=RequirementStatus.UNKNOWN,
-                        value=None,
-                        is_must_have=True,
-                        is_custom=True,
+        # Process dynamic requirement if proposed
+        dyn_obj = data.get("dynamic_requirement")
+        if isinstance(dyn_obj, dict):
+            dyn_id = dyn_obj.get("id")
+            dyn_title = dyn_obj.get("title")
+            dyn_desc = dyn_obj.get("description")
+            if dyn_id and dyn_title and dyn_desc:
+                if not is_duplicate_requirement(dyn_id, dyn_title, state.requirements):
+                    dyn_req = create_dynamic_requirement(
+                        raw_id=dyn_id,
+                        title=dyn_title,
+                        description=dyn_desc,
+                        is_must_have=True
                     )
-                    state.requirements.append(new_req)
-                    logger.info(f"Extra requirement: created custom {clean_id}")
+                    state.requirements.append(dyn_req)
+                    logger.info(f"Created dynamic requirement [{dyn_req.id}] during gap analysis: {dyn_req.title}")
+                else:
+                    logger.info(f"Proposed dynamic requirement [{dyn_id}] was a duplicate. Ignored.")
 
         return True
 

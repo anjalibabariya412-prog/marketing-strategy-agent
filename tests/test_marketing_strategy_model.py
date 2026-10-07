@@ -29,8 +29,8 @@ def test_marketing_strategy_model():
         business_overview="CleanSeas Ocean Cleanup non-profit",
         additional_sections={"Volunteer Strategy": "Gamified volunteer rewards"}
     )
-    assert strategy_populated.business_overview == "CleanSeas Ocean Cleanup non-profit"
-    assert strategy_populated.additional_sections["Volunteer Strategy"] == "Gamified volunteer rewards"
+    assert strategy_populated.business_overview == ["CleanSeas Ocean Cleanup non-profit"]
+    assert strategy_populated.additional_sections["Volunteer Strategy"] == ["Gamified volunteer rewards"]
 
     print("=== MarketingStrategy Model Tests Passed Successfully! ===")
 

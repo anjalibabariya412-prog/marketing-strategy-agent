@@ -42,9 +42,96 @@ ONLINE_PRESENCE_SYSTEM_PROMPT = (
 )
 
 
+def _format_instagram_item(item: dict) -> str:
+    """
+    Formats a single scraped Instagram item using specifically selected strategy fields:
+    caption, hashtags, mentions, timestamp, likesCount, ownerUsername, ownerFullName,
+    type, videoViewCount, paidPartnership, taggedUsers, url.
+
+    Excludes comment clutter (commentsCount, latestComments, etc.) and media/technical properties.
+    """
+    parts = []
+
+    # Owner info
+    owner = item.get("owner")
+    owner_username = item.get("ownerUsername") or (owner.get("username") if isinstance(owner, dict) else None)
+    owner_fullname = item.get("ownerFullName") or (owner.get("fullName") if isinstance(owner, dict) else None)
+    if owner_username or owner_fullname:
+        author_str = f"Author: {owner_fullname or owner_username}"
+        if owner_username and owner_fullname:
+            author_str += f" (@{owner_username})"
+        parts.append(author_str)
+
+    # Post type & timestamp
+    post_type = item.get("type")
+    if post_type:
+        parts.append(f"Type: {post_type}")
+
+    timestamp = item.get("timestamp")
+    if timestamp:
+        parts.append(f"Timestamp: {timestamp}")
+
+    # Caption / Text
+    caption = item.get("caption") or item.get("text")
+    if caption and isinstance(caption, str):
+        parts.append(f"Caption: {caption.strip()}")
+
+    # Hashtags
+    hashtags = item.get("hashtags")
+    if hashtags and isinstance(hashtags, list):
+        clean_tags = [str(t).strip() for t in hashtags if t]
+        if clean_tags:
+            parts.append(f"Hashtags: {', '.join(clean_tags)}")
+
+    # Mentions
+    mentions = item.get("mentions")
+    if mentions and isinstance(mentions, list):
+        clean_mentions = [str(m).strip() for m in mentions if m]
+        if clean_mentions:
+            parts.append(f"Mentions: {', '.join(clean_mentions)}")
+
+    # Tagged Users
+    tagged = item.get("taggedUsers")
+    if tagged and isinstance(tagged, list):
+        tagged_names = []
+        for u in tagged:
+            if isinstance(u, dict):
+                uname = u.get("username") or u.get("fullName")
+                if uname:
+                    tagged_names.append(str(uname))
+            elif isinstance(u, str):
+                tagged_names.append(u.strip())
+        if tagged_names:
+            parts.append(f"Tagged Users: {', '.join(tagged_names)}")
+
+    # Engagement Metrics
+    likes = item.get("likesCount")
+    if likes is not None and isinstance(likes, (int, float)):
+        parts.append(f"Likes: {int(likes)}")
+
+    views = item.get("videoViewCount")
+    if views is not None and isinstance(views, (int, float)):
+        parts.append(f"Video Views: {int(views)}")
+
+    # Paid Partnership
+    paid = item.get("paidPartnership")
+    if paid is None:
+        paid = item.get("isPaidPartnership")
+    if paid is not None:
+        parts.append(f"Paid Partnership: {bool(paid)}")
+
+    # URL
+    url = item.get("url")
+    if url and isinstance(url, str):
+        parts.append(f"URL: {url.strip()}")
+
+    return " | ".join(parts)
+
+
 def _format_scraped_data_for_prompt(scraped_results: List[ApifyScrapeResult]) -> str:
     """
     Formats raw scraped dataset items from Apify results into a clean, text-based prompt snippet per platform.
+    Uses platform-specific formatting for Instagram while retaining generic extraction for other sources.
     """
     platform_texts = {}
 
@@ -56,8 +143,12 @@ def _format_scraped_data_for_prompt(scraped_results: List[ApifyScrapeResult]) ->
         items_snippets = []
 
         for item in res.data[:10]:  # Limit to top 10 items per dataset
-            if isinstance(item, dict):
-                # Extract text fields dynamically
+            if platform == "instagram" and isinstance(item, dict):
+                formatted = _format_instagram_item(item)
+                if formatted:
+                    items_snippets.append(formatted)
+            elif isinstance(item, dict):
+                # Extract text fields dynamically for other platforms
                 parts = []
                 for key in ("title", "text", "caption", "post_text", "description", "name", "url"):
                     val = item.get(key)
@@ -101,12 +192,17 @@ def process_online_presence(
     if formatted_data == "No valid scraped data content available.":
         return None
 
+    company_name = business_context.company_name or "Not provided"
+    product_or_service = business_context.product_or_service or "Not provided"
+    marketing_goal = business_context.marketing_goal or "Not provided"
+    target_audience = business_context.target_audience or "Not provided"
+
     user_prompt_parts = [
         "BUSINESS CONTEXT:",
-        f"Company Name: {business_context.company_name or 'Not provided'}",
-        f"Product/Service: {business_context.product_or_service or 'Not provided'}",
-        f"Marketing Goal: {business_context.marketing_goal or 'Not provided'}",
-        f"Target Audience: {business_context.target_audience or 'Not provided'}",
+        f"Company Name: {company_name}",
+        f"Product/Service: {product_or_service}",
+        f"Marketing Goal: {marketing_goal}",
+        f"Target Audience: {target_audience}",
         "\nSCRAPED ONLINE DATA:",
         formatted_data
     ]
@@ -116,7 +212,7 @@ def process_online_presence(
         logger.info("Calling LLM to process scraped online presence into OnlinePresenceContext...")
         llm_output = get_llm_response(
             system_prompt=ONLINE_PRESENCE_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
+            prompt=user_prompt,
             temperature=0.2
         )
 

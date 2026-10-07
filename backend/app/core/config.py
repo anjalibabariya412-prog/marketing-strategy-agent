@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # Groq LLM settings
     groq_api_key: str
-    groq_model: str = "openai/gpt-oss-20b"  # default if not set in .env
+    groq_model: str = "openai/gpt-oss-120b"  # default if not set in .env
 
     # Maximum clarifying questions limit before forcing strategy generation
     max_questions: int = 6

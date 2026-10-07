@@ -1,155 +1,335 @@
+import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+
 from apify_client import ApifyClientAsync
 
 from backend.app.core.config import settings
 from backend.app.models.parsed_url import ParsedURL
 from backend.app.models.scraped_result import ApifyScrapeResult
 
+
 logger = logging.getLogger(__name__)
+
 
 ACTOR_MAPPING: Dict[str, Dict[str, Any]] = {
     "website": {
         "actor_id": "apify/website-content-crawler",
-        "build_input": lambda url: {"startUrls": [{"url": url}], "maxCrawlPages": 3},
+        "build_input": lambda url: {
+            "startUrls": [{"url": url}],
+            "maxCrawlPages": 3,
+        },
     },
     "instagram": {
         "actor_id": "apify/instagram-scraper",
-        "build_input": lambda url: {"directUrls": [url], "resultsLimit": 5},
+        "build_input": lambda url: {
+            "directUrls": [url],
+            "resultsLimit": 5,
+        },
     },
     "facebook": {
         "actor_id": "apify/facebook-posts-scraper",
-        "build_input": lambda url: {"startUrls": [{"url": url}], "maxPosts": 5},
+        "build_input": lambda url: {
+            "startUrls": [{"url": url}],
+            "maxPosts": 5,
+        },
     },
     "linkedin": {
         "actor_id": "apify/linkedin-post-scraper",
-        "build_input": lambda url: {"urls": [url], "deepScrape": False},
+        "build_input": lambda url: {
+            "urls": [url],
+            "deepScrape": False,
+        },
     },
 }
 
 
-async def scrape_single_parsed_url(parsed_url: ParsedURL) -> ApifyScrapeResult:
+async def scrape_single_parsed_url(
+    parsed_url: ParsedURL,
+) -> ApifyScrapeResult:
     """
-    Scrapes a single ParsedURL using the corresponding Apify Actor based on platform.
-    Handles invalid URLs, unconfigured API keys, network/API errors, and empty datasets gracefully.
+    Scrape a single ParsedURL using the corresponding Apify Actor.
+
+    Handles:
+    - Invalid URLs
+    - Unsupported platforms
+    - Missing Apify API token
+    - Apify execution errors
+    - Missing dataset ID
+    - Empty datasets
     """
+
+    # ---------------------------------------------------------
+    # 1. Validate parsed URL
+    # ---------------------------------------------------------
     if not parsed_url.is_valid or not parsed_url.normalized_url:
-        logger.warning(f"Skipping Apify scraping for invalid URL: '{parsed_url.original_url}'")
+        logger.warning(
+            f"Skipping Apify scraping for invalid URL: "
+            f"'{parsed_url.original_url}'"
+        )
+
         return ApifyScrapeResult(
             original_url=parsed_url.original_url,
             normalized_url=parsed_url.normalized_url,
             platform=parsed_url.platform,
             success=False,
             data=None,
-            error=parsed_url.error or "Invalid URL string skipped"
+            error=parsed_url.error or "Invalid URL string skipped",
         )
 
+    # ---------------------------------------------------------
+    # 2. Check supported platform
+    # ---------------------------------------------------------
     platform = parsed_url.platform
+
     if platform not in ACTOR_MAPPING:
-        logger.warning(f"Skipping Apify scraping for unsupported platform '{platform}' (URL: '{parsed_url.original_url}')")
+        logger.warning(
+            f"Skipping Apify scraping for unsupported platform "
+            f"'{platform}' (URL: '{parsed_url.original_url}')"
+        )
+
         return ApifyScrapeResult(
             original_url=parsed_url.original_url,
             normalized_url=parsed_url.normalized_url,
             platform=parsed_url.platform,
             success=False,
             data=None,
-            error=f"Platform '{platform}' is not supported by Apify scraping service"
+            error=(
+                f"Platform '{platform}' is not supported "
+                f"by Apify scraping service"
+            ),
         )
 
+    # ---------------------------------------------------------
+    # 3. Get Apify API token
+    # ---------------------------------------------------------
     token = settings.apify_api_key or settings.apify_api_token
+
     if not token:
-        logger.error("Apify API token is not configured in application settings.")
+        logger.error(
+            "Apify API token is not configured in application settings."
+        )
+
         return ApifyScrapeResult(
             original_url=parsed_url.original_url,
             normalized_url=parsed_url.normalized_url,
             platform=parsed_url.platform,
             success=False,
             data=None,
-            error="Apify API token is missing or not configured"
+            error="Apify API token is missing or not configured",
         )
 
+    # ---------------------------------------------------------
+    # 4. Get Actor configuration
+    # ---------------------------------------------------------
     actor_info = ACTOR_MAPPING[platform]
+
     actor_id = actor_info["actor_id"]
     target_url = parsed_url.normalized_url
     run_input = actor_info["build_input"](target_url)
 
-    logger.info(f"Starting Apify actor '{actor_id}' for platform '{platform}' on URL '{target_url}'")
+    logger.info(
+        f"Starting Apify actor '{actor_id}' "
+        f"for platform '{platform}' "
+        f"on URL '{target_url}'"
+    )
 
     try:
+        # -----------------------------------------------------
+        # 5. Create Apify client
+        # -----------------------------------------------------
         client = ApifyClientAsync(token=token)
-        run = await client.actor(actor_id).call(run_input=run_input)
+
+        # -----------------------------------------------------
+        # 6. Start Actor and wait for completion
+        # -----------------------------------------------------
+        run = await client.actor(actor_id).call(
+            run_input=run_input
+        )
 
         if not run:
-            logger.error(f"Apify actor '{actor_id}' returned None response.")
+            logger.error(
+                f"Apify actor '{actor_id}' returned None response."
+            )
+
             return ApifyScrapeResult(
                 original_url=parsed_url.original_url,
                 normalized_url=parsed_url.normalized_url,
                 platform=parsed_url.platform,
                 success=False,
                 data=None,
-                error="Apify Actor returned empty run response"
+                error="Apify Actor returned empty run response",
             )
 
-        dataset_id = run.get("defaultDatasetId") or run.get("default_dataset_id")
+        # -----------------------------------------------------
+        # 7. Get dataset ID
+        #
+        # IMPORTANT:
+        # `run` is an Apify Run object, not a dictionary.
+        # Therefore, do NOT use run.get(...)
+        # -----------------------------------------------------
+        if isinstance(run, dict):
+            dataset_id = run.get("default_dataset_id") or run.get("defaultDatasetId")
+        else:
+            dataset_id = getattr(run, "default_dataset_id", None) or getattr(run, "defaultDatasetId", None) or (run.get("default_dataset_id") if hasattr(run, "get") else None) or (run.get("defaultDatasetId") if hasattr(run, "get") else None)
+
         if not dataset_id:
-            logger.error(f"Apify actor '{actor_id}' run missing default dataset ID.")
+            logger.error(
+                f"Apify actor '{actor_id}' run missing "
+                f"default dataset ID."
+            )
+
             return ApifyScrapeResult(
                 original_url=parsed_url.original_url,
                 normalized_url=parsed_url.normalized_url,
                 platform=parsed_url.platform,
                 success=False,
                 data=None,
-                error="Apify Actor run response missing default dataset ID"
+                error=(
+                    "Apify Actor run response missing "
+                    "default dataset ID"
+                ),
             )
 
-        dataset_client = client.dataset(dataset_id)
-        items_page = await dataset_client.list_items()
-        items = items_page.items if hasattr(items_page, "items") else (items_page.get("items") if isinstance(items_page, dict) else [])
+        logger.info(
+            f"Apify actor '{actor_id}' completed successfully. "
+            f"Dataset ID: '{dataset_id}'"
+        )
 
+        # -----------------------------------------------------
+        # 8. Fetch dataset items
+        # -----------------------------------------------------
+        dataset_client = client.dataset(dataset_id)
+
+        items_page = await dataset_client.list_items()
+
+        # Apify SDK normally returns an object with `.items`.
+        # Keep dictionary fallback for compatibility.
+        if hasattr(items_page, "items"):
+            items = items_page.items
+        elif isinstance(items_page, dict):
+            items = items_page.get("items", [])
+        else:
+            items = []
+
+        # -----------------------------------------------------
+        # 9. Handle empty dataset
+        # -----------------------------------------------------
         if not items:
-            logger.warning(f"Apify actor '{actor_id}' finished but default dataset '{dataset_id}' returned 0 items.")
+            logger.warning(
+                f"Apify actor '{actor_id}' finished but "
+                f"default dataset '{dataset_id}' returned 0 items."
+            )
+
             return ApifyScrapeResult(
                 original_url=parsed_url.original_url,
                 normalized_url=parsed_url.normalized_url,
                 platform=parsed_url.platform,
                 success=False,
                 data=[],
-                error="Apify Actor execution returned empty dataset"
+                error="Apify Actor execution returned empty dataset",
             )
 
-        logger.info(f"Successfully scraped {len(items)} items from Apify actor '{actor_id}' for URL '{target_url}'")
+        # -----------------------------------------------------
+        # 10. Successful result
+        # -----------------------------------------------------
+        logger.info(
+            f"Successfully scraped {len(items)} items "
+            f"from Apify actor '{actor_id}' "
+            f"for URL '{target_url}'"
+        )
+
         return ApifyScrapeResult(
             original_url=parsed_url.original_url,
             normalized_url=parsed_url.normalized_url,
             platform=parsed_url.platform,
             success=True,
             data=items,
-            error=None
+            error=None,
         )
 
     except Exception as e:
-        logger.error(f"Apify execution failed for URL '{target_url}' on actor '{actor_id}': {e}")
+        # -----------------------------------------------------
+        # 11. Graceful Apify error handling
+        # -----------------------------------------------------
+        logger.error(
+            f"Apify execution failed for URL '{target_url}' "
+            f"on actor '{actor_id}': {e}"
+        )
+
         return ApifyScrapeResult(
             original_url=parsed_url.original_url,
             normalized_url=parsed_url.normalized_url,
             platform=parsed_url.platform,
             success=False,
             data=None,
-            error=f"Apify execution error: {str(e)}"
+            error=f"Apify execution error: {str(e)}",
         )
 
 
-async def scrape_parsed_urls(parsed_urls: List[ParsedURL]) -> List[ApifyScrapeResult]:
+async def scrape_parsed_urls(
+    parsed_urls: List[ParsedURL],
+) -> List[ApifyScrapeResult]:
     """
-    Processes multiple ParsedURL objects sequentially or concurrently and returns a list of ApifyScrapeResult objects.
-    Ensures failure of one URL does not crash or block processing for other URLs.
+    Scrape multiple ParsedURL objects concurrently.
+
+    asyncio.gather() allows independent Apify scraping tasks
+    to run concurrently instead of waiting for each URL
+    one by one.
+
+    The returned results preserve the same order as parsed_urls.
     """
+
+    # ---------------------------------------------------------
+    # 1. Nothing to scrape
+    # ---------------------------------------------------------
     if not parsed_urls:
         return []
 
-    results: List[ApifyScrapeResult] = []
-    for parsed_url in parsed_urls:
-        res = await scrape_single_parsed_url(parsed_url)
-        results.append(res)
+    # ---------------------------------------------------------
+    # 2. Run all URL scraping tasks concurrently
+    # ---------------------------------------------------------
+    results_or_exceptions = await asyncio.gather(
+        *(
+            scrape_single_parsed_url(parsed_url)
+            for parsed_url in parsed_urls
+        ),
+        return_exceptions=True,
+    )
 
-    return results
+    # ---------------------------------------------------------
+    # 3. Normalize results
+    # ---------------------------------------------------------
+    clean_results: List[ApifyScrapeResult] = []
+
+    for parsed_url, result in zip(
+        parsed_urls,
+        results_or_exceptions,
+    ):
+
+        # Unexpected exception outside the normal
+        # error handling inside scrape_single_parsed_url()
+        if isinstance(result, Exception):
+            logger.error(
+                f"Unhandled exception during scraping for URL "
+                f"'{parsed_url.original_url}': {result}"
+            )
+
+            clean_results.append(
+                ApifyScrapeResult(
+                    original_url=parsed_url.original_url,
+                    normalized_url=parsed_url.normalized_url,
+                    platform=parsed_url.platform,
+                    success=False,
+                    data=None,
+                    error=(
+                        "Unhandled exception during async scrape: "
+                        f"{str(result)}"
+                    ),
+                )
+            )
+
+        elif isinstance(result, ApifyScrapeResult):
+            clean_results.append(result)
+
+    return clean_results

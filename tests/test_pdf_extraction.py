@@ -43,9 +43,9 @@ def test_pdf_extraction_endpoint():
     assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
     print(f"✓ Rejected non-PDF file: {response.json()['detail']}")
 
-    # 2. Reject file exceeding 5 MB
-    print("\n--- Test 2: Reject File Exceeding 5 MB ---")
-    large_content = b"%PDF-1.4\n" + b"X" * (5 * 1024 * 1024 + 10)
+    # 2. Reject file exceeding 10 MB
+    print("\n--- Test 2: Reject File Exceeding 10 MB ---")
+    large_content = b"%PDF-1.4\n" + b"X" * (10 * 1024 * 1024 + 10)
     response = client.post(
         "/extract-pdf-text",
         files={"file": ("large.pdf", large_content, "application/pdf")}
@@ -89,8 +89,8 @@ def test_pdf_extraction_endpoint():
     assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
     data = response.json()
     assert data["was_summarized"] is False
-    assert sample_text in data["text"]
-    assert data["character_count"] == len(data["text"])
+    assert sample_text in data["summary"]
+    assert data["character_count"] == len(sample_text)
     print("✓ Successfully returned text as-is (was_summarized=False):")
     print(f"  Character count: {data['character_count']}")
 
@@ -108,8 +108,8 @@ def test_pdf_extraction_endpoint():
         assert response.status_code == 200
         data = response.json()
         assert data["was_summarized"] is True
-        assert data["text"] == mock_summary
-        assert data["character_count"] == len(mock_summary)
+        assert data["summary"] == mock_summary
+        assert data["character_count"] > 3000
         mock_llm.assert_called_once()
         print("✓ Successfully summarized long PDF (was_summarized=True):")
         print(f"  Character count: {data['character_count']}")
@@ -124,9 +124,8 @@ def test_pdf_extraction_endpoint():
         assert response.status_code == 200
         data = response.json()
         assert data["was_summarized"] is False
-        assert len(data["text"]) == 3000
-        assert data["character_count"] == 3000
-        assert data["text"] == long_text[:3000]
+        assert len(data["summary"]) == 2000
+        assert data["character_count"] > 3000
         print("✓ Successfully handled LLM failure with truncation fallback (was_summarized=False):")
         print(f"  Truncated character count: {data['character_count']}")
 

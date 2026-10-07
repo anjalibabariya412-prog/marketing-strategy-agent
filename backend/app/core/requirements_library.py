@@ -3,27 +3,37 @@ from backend.app.models.information_requirement import InformationRequirement, R
 from backend.app.models.agent_state import MarketingAgentState
 
 REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
-    # Must-Have Requirements (is_must_have=True)
     InformationRequirement(
-        id="customer_pain_points",
-        title="Customer Pain Points",
+        id="target_market_location",
+        title="Target Market & Geographic Scope",
         description=(
-            "The specific problem, frustration, or unmet need that drives someone to this business "
-            "when one exists, and otherwise the occasion, motivation, or purpose that brings them "
-            "(for example wanting a comfortable place to meet or work)."
+            "Understand where the business wants to compete or acquire customers, "
+            "including target cities, regions, states, countries, local/regional/national/international reach, "
+            "and priority geographic markets."
         ),
-        is_must_have=False,
+        is_must_have=True,
         status=RequirementStatus.UNKNOWN,
         value=None,
         is_custom=False,
     ),
     InformationRequirement(
-        id="competitors",
-        title="Competitors",
+        id="customer_needs_buying_behavior",
+        title="Customer Needs, Motivations & Buying Behavior",
         description=(
-            "Direct or indirect alternative options that customers might choose instead of "
-            "this offering. Identifying competitors helps establish market differentiation and "
-            "highlight unique competitive advantages."
+            "Understand what target customers need, value, prefer, consider, and what motivates "
+            "or influences their purchase decisions."
+        ),
+        is_must_have=True,
+        status=RequirementStatus.UNKNOWN,
+        value=None,
+        is_custom=False,
+    ),
+    InformationRequirement(
+        id="competitive_landscape",
+        title="Competitive Landscape & Alternatives",
+        description=(
+            "Understand the competitive environment relevant to the business, including direct competitors, "
+            "indirect competitors, alternative solutions, competitor strengths and weaknesses, and potential market gaps."
         ),
         is_must_have=True,
         status=RequirementStatus.UNKNOWN,
@@ -32,10 +42,10 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
     ),
     InformationRequirement(
         id="usp_differentiation",
-        title="USP / Differentiation",
+        title="Positioning, USP & Differentiation",
         description=(
-            "The unique attributes, features, or positioning that make this business distinct "
-            "from alternatives. Essential for establishing a clear competitive edge and value prop."
+            "Understand what makes the product, service, or business different or valuable, including strongest benefits, "
+            "unique qualities, competitive advantages, positioning, and reasons customers should choose the offering."
         ),
         is_must_have=True,
         status=RequirementStatus.UNKNOWN,
@@ -43,12 +53,11 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
         is_custom=False,
     ),
     InformationRequirement(
-        id="pricing_model",
-        title="Pricing Model",
+        id="pricing_offer_structure",
+        title="Pricing, Offers & Commercial Model",
         description=(
-            "The price and payment structure of the product or service being sold to customers. "
-            "Examples: product price, service fee, monthly subscription, yearly subscription, one-time payment, packages, etc. "
-            "Note: This refers to what customers pay for the product/service, NOT the money available for marketing activities ('budget_resources')."
+            "Understand the commercial structure of the offering, including pricing, price ranges, packages, plans, "
+            "discounts, promotions, subscriptions, payment structures, and other relevant commercial offers or constraints."
         ),
         is_must_have=True,
         status=RequirementStatus.UNKNOWN,
@@ -56,14 +65,12 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
         is_custom=False,
     ),
     InformationRequirement(
-        id="sales_process",
-        title="Sales / Conversion Process",
+        id="sales_conversion_journey",
+        title="Sales & Conversion Journey",
         description=(
-            "The steps and mechanism through which a prospect transitions into a customer "
-            "(e.g., online checkout, consultative sales call, or direct interaction). Helps "
-            "in designing effective funnels and customer journeys."
+            "Understand how a potential customer moves from discovering the business to becoming a customer."
         ),
-        is_must_have=False,
+        is_must_have=True,
         status=RequirementStatus.UNKNOWN,
         value=None,
         is_custom=False,

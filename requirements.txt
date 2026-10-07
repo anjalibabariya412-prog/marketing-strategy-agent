@@ -15,4 +15,4 @@ langgraph-checkpoint-postgres
 
 pdfplumber
 python-multipart
-apify-client
+apify-client
