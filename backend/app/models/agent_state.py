@@ -42,6 +42,10 @@ class MarketingAgentState(BaseModel):
         default=False,
         description="Tracks whether the one-time relevance analysis has already run for this conversation."
     )
+    first_message_generated: bool = Field(
+        default=False,
+        description="Tracks whether the initial contextual agent message has been generated for this conversation."
+    )
     pending_question: Optional[str] = Field(
         default=None,
         description="The pre-planned next question generated in a merged turn call, waiting to be served."

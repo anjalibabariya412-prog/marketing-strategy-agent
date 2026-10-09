@@ -7,19 +7,13 @@ from apify_client import ApifyClientAsync
 from backend.app.core.config import settings
 from backend.app.models.parsed_url import ParsedURL
 from backend.app.models.scraped_result import ApifyScrapeResult
+from backend.app.services.firecrawl_service import scrape_website_url
 
 
 logger = logging.getLogger(__name__)
 
 
 ACTOR_MAPPING: Dict[str, Dict[str, Any]] = {
-    "website": {
-        "actor_id": "apify/website-content-crawler",
-        "build_input": lambda url: {
-            "startUrls": [{"url": url}],
-            "maxCrawlPages": 3,
-        },
-    },
     "instagram": {
         "actor_id": "apify/instagram-scraper",
         "build_input": lambda url: {
@@ -48,15 +42,16 @@ async def scrape_single_parsed_url(
     parsed_url: ParsedURL,
 ) -> ApifyScrapeResult:
     """
-    Scrape a single ParsedURL using the corresponding Apify Actor.
+    Scrape a single ParsedURL using the corresponding provider:
+    - Firecrawl for website platform
+    - Apify Actors for social platforms (instagram, facebook, linkedin)
 
     Handles:
     - Invalid URLs
     - Unsupported platforms
-    - Missing Apify API token
-    - Apify execution errors
-    - Missing dataset ID
-    - Empty datasets
+    - Missing API tokens
+    - Execution errors
+    - Missing dataset ID / empty datasets
     """
 
     # ---------------------------------------------------------
@@ -64,7 +59,7 @@ async def scrape_single_parsed_url(
     # ---------------------------------------------------------
     if not parsed_url.is_valid or not parsed_url.normalized_url:
         logger.warning(
-            f"Skipping Apify scraping for invalid URL: "
+            f"Skipping scraping for invalid URL: "
             f"'{parsed_url.original_url}'"
         )
 
@@ -76,6 +71,13 @@ async def scrape_single_parsed_url(
             data=None,
             error=parsed_url.error or "Invalid URL string skipped",
         )
+
+    # ---------------------------------------------------------
+    # 2. Dispatch to Firecrawl for website platform
+    # ---------------------------------------------------------
+    platform = parsed_url.platform
+    if platform == "website":
+        return await scrape_website_url(parsed_url)
 
     # ---------------------------------------------------------
     # 2. Check supported platform

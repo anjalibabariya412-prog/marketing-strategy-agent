@@ -1,11 +1,16 @@
+from datetime import datetime, timezone
 import json
 import logging
-from typing import List, Optional
+import uuid
+from typing import Any, Dict, List, Optional
 
 from backend.app.models.business_context import BusinessContext
 from backend.app.models.online_presence import OnlinePresenceContext, OnlineSourceSummary
+from backend.app.models.parsed_url import ParsedURL
 from backend.app.models.scraped_result import ApifyScrapeResult
 from backend.app.services.llm_service import get_llm_response, LLMServiceError
+from backend.app.db.session import SessionLocal
+from backend.app.db.orm.online_presence_source import OnlinePresenceSource
 
 logger = logging.getLogger(__name__)
 
@@ -233,3 +238,102 @@ def process_online_presence(
     except Exception as e:
         logger.error(f"Failed to process online presence with LLM: {e}")
         return None
+
+
+def save_online_presence_sources(
+    strategy_request_id: uuid.UUID,
+    parsed_urls: List[ParsedURL],
+    scraped_results: List[ApifyScrapeResult],
+    online_presence_ctx: Optional[OnlinePresenceContext] = None,
+) -> None:
+    """
+    Persists scraping and summary results for online presence sources into the
+    online_presence_sources database table.
+    Enforces unique constraint per strategy_request_id and platform.
+    """
+    if not strategy_request_id or not parsed_urls:
+        return
+
+    seen_platforms = set()
+    records_to_insert: List[OnlinePresenceSource] = []
+
+    for parsed_url, res in zip(parsed_urls, scraped_results):
+        platform = parsed_url.platform if parsed_url and parsed_url.platform else "unknown"
+
+        # Enforce unique constraint: 1 row per platform per strategy request
+        if platform in seen_platforms:
+            logger.info(
+                f"Skipping duplicate platform '{platform}' for strategy_request_id '{strategy_request_id}'."
+            )
+            continue
+        seen_platforms.add(platform)
+
+        original_url = parsed_url.original_url if parsed_url else (res.original_url if res else "")
+        normalized_url = parsed_url.normalized_url if parsed_url else (res.normalized_url if res else None)
+
+        # Determine scrape_status & error_message
+        success = res.success if res else False
+        error_msg = (
+            res.error if res and res.error else (parsed_url.error if parsed_url and parsed_url.error else None)
+        )
+
+        if success:
+            scrape_status = "success"
+        elif error_msg and any(kw in error_msg.lower() for kw in ("skip", "not supported", "invalid")):
+            scrape_status = "skipped"
+        else:
+            scrape_status = "failed"
+
+        # Determine platform summary from OnlinePresenceContext if available
+        platform_summary = None
+        if online_presence_ctx:
+            if platform == "website" and online_presence_ctx.website:
+                platform_summary = online_presence_ctx.website.summary
+            elif platform == "instagram" and online_presence_ctx.instagram:
+                platform_summary = online_presence_ctx.instagram.summary
+            elif platform == "facebook" and online_presence_ctx.facebook:
+                platform_summary = online_presence_ctx.facebook.summary
+            elif platform == "linkedin" and online_presence_ctx.linkedin:
+                platform_summary = online_presence_ctx.linkedin.summary
+
+        # Determine details JSON structure
+        details_json = None
+        if res and res.data is not None:
+            if isinstance(res.data, dict):
+                details_json = res.data
+            elif isinstance(res.data, list):
+                details_json = {"items": res.data}
+            else:
+                details_json = {"raw": str(res.data)}
+
+        scraped_at_val = datetime.now(timezone.utc) if success else None
+
+        record = OnlinePresenceSource(
+            strategy_request_id=strategy_request_id,
+            platform=platform,
+            original_url=original_url,
+            normalized_url=normalized_url,
+            scrape_status=scrape_status,
+            error_message=error_msg,
+            summary=platform_summary,
+            details=details_json,
+            scraped_at=scraped_at_val,
+        )
+        records_to_insert.append(record)
+
+    if not records_to_insert:
+        return
+
+    try:
+        with SessionLocal() as db:
+            for record in records_to_insert:
+                db.add(record)
+            db.commit()
+            logger.info(
+                f"Successfully persisted {len(records_to_insert)} OnlinePresenceSource record(s) "
+                f"for StrategyRequest '{strategy_request_id}'."
+            )
+    except Exception as db_err:
+        logger.error(
+            f"Failed to persist OnlinePresenceSource records for StrategyRequest '{strategy_request_id}': {db_err}"
+        )
