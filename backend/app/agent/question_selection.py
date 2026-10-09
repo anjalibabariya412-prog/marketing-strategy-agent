@@ -362,3 +362,218 @@ def prepare_next_question(state: MarketingAgentState) -> Optional[str]:
     state.current_question = question_text
     state.active_requirement_id = selected_req.id
     return question_text
+
+
+FIRST_MESSAGE_SYSTEM_PROMPT = (
+    "You are an expert marketing strategy consultant starting a discovery conversation with a client.\n"
+    "Your task is to generate the VERY FIRST agent message. The message MUST contain TWO connected parts inside ONE single agent response:\n\n"
+    "PART 1: BUSINESS UNDERSTANDING (2–4 sentences max)\n"
+    "- Summarize what you actually know about the client's business based ONLY on the provided context.\n"
+    "- Adapt strictly to available sources:\n"
+    "  * If website analysis is available: You may reference findings from their website/products.\n"
+    "  * If NO website is available: DO NOT mention 'website', 'your website', or 'found on your website'. Rely on initial business details, social media, or uploaded documents instead.\n"
+    "  * If social media is available (and no website): Reference social findings if explicitly present in extracted data.\n"
+    "  * If a past marketing document/PDF is provided: Use information from it.\n"
+    "- GROUNDING MANDATE: DO NOT invent facts, competitors, pricing, locations, USP, customer demographics, pain points, product claims, or numbers not explicitly present in context.\n\n"
+    "PART 2: CONNECTED TRANSITION & ONE QUESTION\n"
+    "- Select ONE missing requirement from the provided CANDIDATE MISSING REQUIREMENTS list that is most strategically valuable based on what is already known vs missing.\n"
+    "- Use a natural transition phrase (e.g., 'With that in mind, ...', 'To understand your positioning better, ...', 'Based on this, ...', 'To help shape the strategy around your business, ...', 'Given what I\\'ve seen so far, ...').\n"
+    "- Ask exactly ONE clear, direct, business-specific question targeting that selected requirement.\n"
+    "- Do NOT ask multiple requirements in one question.\n\n"
+    "OUTPUT FORMAT:\n"
+    "You MUST respond ONLY with a JSON object in this exact schema:\n"
+    "{\n"
+    '  "context_summary": "<2-4 sentences summarizing business context strictly grounded in facts>",\n'
+    '  "transition": "<Natural transition phrase e.g. With that in mind,>",\n'
+    '  "selected_requirement_id": "<ID of selected requirement from candidates list>",\n'
+    '  "question": "<ONE clear question targeting the selected requirement>",\n'
+    '  "reasoning": "<Short explanation for selecting this requirement>"\n'
+    "}\n"
+    "Do NOT include markdown formatting or commentary outside the JSON object."
+)
+
+
+def _build_first_message_fallback(state: MarketingAgentState, selected_req: InformationRequirement) -> str:
+    """
+    Builds a grounded, safe fallback for the first contextual message if LLM generation fails or returns invalid JSON.
+    """
+    ctx = state.business_context
+    company = ctx.company_name
+    product = ctx.product_or_service
+    goal = ctx.marketing_goal
+
+    op_ctx = state.online_presence_context
+    has_website = bool(op_ctx and op_ctx.website and op_ctx.website.summary)
+
+    if has_website and company and product:
+        summary = f"I can see that {company} offers {product} based on your online presence."
+    elif company and product and goal:
+        summary = f"I understand that {company} offers {product} and is focused on {goal}."
+    elif company and product:
+        summary = f"I understand that {company} provides {product}."
+    elif product and goal:
+        summary = f"I understand that your business offers {product} with a primary goal of {goal}."
+    elif product:
+        summary = f"I understand that your business provides {product}."
+    elif company:
+        summary = f"I understand that {company} is aiming to develop a personalized marketing strategy."
+    else:
+        summary = "I have reviewed the initial business details you provided."
+
+    transitions_and_questions = {
+        "usp_differentiation": (
+            "To help shape the strategy around your business,",
+            "what would you say is the most important thing that differentiates your offering from alternatives?"
+        ),
+        "customer_needs_buying_behavior": (
+            "To understand your target audience better,",
+            "what do your customers value most when choosing your product or service?"
+        ),
+        "competitive_landscape": (
+            "To position your brand effectively,",
+            "who are the main competitors or alternatives your potential customers consider?"
+        ),
+        "target_market_location": (
+            "Given what I've seen so far,",
+            "which geographic locations or regions do you want to target?"
+        ),
+        "pricing_offer_structure": (
+            "With that in mind,",
+            "what are the typical price ranges across your products or services?"
+        ),
+        "sales_conversion_journey": (
+            "To understand your customer flow,",
+            "how do potential customers usually place an order or buy from you?"
+        ),
+    }
+
+    t_and_q = transitions_and_questions.get(
+        selected_req.id,
+        ("To help shape the strategy around your business,", f"what key details can you share regarding your {selected_req.title.lower()}?")
+    )
+    transition, question = t_and_q
+
+    greeting = "Hi! Let's get started on your marketing plan. Here is my initial summary of your profile:"
+    return f"{greeting}\n\n{summary}\n\n{transition} {question}"
+
+
+def generate_first_contextual_message(state: MarketingAgentState) -> str:
+    """
+    Generates the initial contextual agent message combining grounded business understanding
+    and a connected question targeting the single highest-value missing requirement.
+
+    Sets state.current_question, state.active_requirement_id, and state.first_message_generated = True.
+    Returns the combined message text string.
+    """
+    already_asked_or_resolved_ids = {
+        req.id for req in state.requirements
+        if req.status != RequirementStatus.UNKNOWN
+    }
+    candidates = [
+        req for req in state.requirements
+        if req.status == RequirementStatus.UNKNOWN and req.id not in already_asked_or_resolved_ids
+    ]
+
+    if not candidates:
+        logger.info("generate_first_contextual_message: No candidates missing. Marking first_message_generated=True.")
+        state.first_message_generated = True
+        return prepare_next_question(state) or ""
+
+    ctx = state.business_context
+    context_lines = [
+        f"Company Name: {ctx.company_name or 'Not provided'}",
+        f"Product/Service: {ctx.product_or_service or 'Not provided'}",
+        f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}",
+        f"Target Audience: {ctx.target_audience or 'Not provided'}",
+        f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
+        f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
+        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}",
+    ]
+
+    op_str = format_online_presence_context(state.online_presence_context)
+    if op_str:
+        context_lines.append(f"\nONLINE PRESENCE CONTEXT (scraped/verified website & social media sources):\n{op_str}")
+
+    resolved_reqs = [
+        req for req in state.requirements
+        if req.status != RequirementStatus.UNKNOWN
+    ]
+    if resolved_reqs:
+        context_lines.append("\nALREADY RESOLVED REQUIREMENTS:")
+        for req in resolved_reqs:
+            if req.status == RequirementStatus.KNOWN and req.value:
+                context_lines.append(f"- {req.title} ({req.id}): KNOWN -> {req.value}")
+
+    context_str = "\n".join(context_lines)
+
+    reqs_formatted = []
+    for req in candidates:
+        must_have_label = "Yes" if req.is_must_have else "No"
+        reqs_formatted.append(
+            f"- ID: {req.id}\n"
+            f"  Title: {req.title}\n"
+            f"  Must Have: {must_have_label}\n"
+            f"  Description: {req.description}"
+        )
+    reqs_str = "\n".join(reqs_formatted)
+
+    user_prompt = (
+        f"BUSINESS CONTEXT & ONLINE PRESENCE:\n{context_str}\n\n"
+        f"CANDIDATE MISSING REQUIREMENTS:\n{reqs_str}\n\n"
+        "Generate the first contextual agent message (Part 1: business understanding summary, Part 2: connected transition + question targeting ONE requirement)."
+    )
+
+    try:
+        raw_response = get_llm_response(
+            prompt=user_prompt,
+            system_prompt=FIRST_MESSAGE_SYSTEM_PROMPT,
+            response_format={"type": "json_object"}
+        )
+
+        data = json.loads(raw_response)
+        context_summary = (data.get("context_summary") or "").strip()
+        transition = (data.get("transition") or "").strip()
+        selected_id = data.get("selected_requirement_id") or data.get("selected_id")
+        question = (data.get("question") or "").strip()
+        reasoning = data.get("reasoning", "No reasoning provided.")
+
+        candidate_ids = {req.id for req in candidates}
+        if selected_id and selected_id in candidate_ids and context_summary and question:
+            selected_req = state.get_requirement_by_id(selected_id)
+            if selected_req:
+                if transition:
+                    transition_clean = transition.rstrip(",")
+                    if not transition.endswith(",") and not transition.endswith("."):
+                        transition_clean = transition + ","
+                    else:
+                        transition_clean = transition
+
+                    if question and question[0].isupper() and transition_clean.endswith(","):
+                        question_clean = question[0].lower() + question[1:]
+                    else:
+                        question_clean = question
+
+                    combined_question = f"{transition_clean} {question_clean}"
+                else:
+                    combined_question = question
+
+                greeting = "Hi! Let's get started on your marketing plan. Here is my initial summary of your profile:"
+                full_message = f"{greeting}\n\n{context_summary}\n\n{combined_question}"
+
+                state.current_question = full_message
+                state.active_requirement_id = selected_req.id
+                state.first_message_generated = True
+                logger.info(f"Generated first contextual agent message for requirement '{selected_req.id}'. Reasoning: {reasoning}")
+                return full_message
+        else:
+            logger.warning(f"LLM output for first contextual message missing fields or invalid selected_id '{selected_id}'. Using fallback.")
+
+    except Exception as e:
+        logger.error(f"Error in generate_first_contextual_message: {e}. Using fallback.")
+
+    fallback_req = _get_default_fallback(candidates)
+    full_message = _build_first_message_fallback(state, fallback_req)
+    state.current_question = full_message
+    state.active_requirement_id = fallback_req.id
+    state.first_message_generated = True
+    return full_message

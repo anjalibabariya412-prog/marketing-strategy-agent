@@ -8,7 +8,7 @@ from backend.app.core.config import settings
 from backend.app.models.agent_state import MarketingAgentState
 from backend.app.models.information_requirement import RequirementStatus
 from backend.app.agent.gap_analysis import analyze_relevance
-from backend.app.agent.question_selection import prepare_next_question
+from backend.app.agent.question_selection import prepare_next_question, generate_first_contextual_message
 from backend.app.agent.answer_processing import process_answer_for_requirement, process_answer_and_plan_next
 from backend.app.agent.sufficiency_check import is_sufficient
 from backend.app.agent.strategy_generation import generate_strategy
@@ -62,7 +62,10 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
 
     # 1. Promote pending question if present and valid, otherwise prepare next question if no active question exists
     if not state.current_question or not state.active_requirement_id:
-        if state.pending_question and state.pending_requirement_id:
+        if not state.first_message_generated:
+            logger.info("Graph Node [ask]: Generating FIRST contextual agent message")
+            generate_first_contextual_message(state)
+        elif state.pending_question and state.pending_requirement_id:
             pending_req = state.get_requirement_by_id(state.pending_requirement_id)
             asked_ids = {turn.requirement_id for turn in state.qa_history if turn.requirement_id} if state.qa_history else set()
             if pending_req and pending_req.status == RequirementStatus.UNKNOWN and pending_req.id not in asked_ids:

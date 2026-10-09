@@ -9,8 +9,9 @@ class Settings(BaseSettings):
     """
 
     # Groq LLM settings
-    groq_api_key: str
-    groq_model: str = "openai/gpt-oss-120b"  # default if not set in .env
+    # OpenAI LLM settings
+    openai_api_key: str
+    openai_model: str = "gpt-4o-mini"  # default if not set in .env
 
     # Maximum clarifying questions limit before forcing strategy generation
     max_questions: int = 6
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
     @property
     def apify_api_key(self) -> Optional[str]:
         return self.apify_api_token
+
+    # Firecrawl settings
+    firecrawl_api_key: Optional[str] = None
 
     # This tells Pydantic Settings where to find the .env file
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

@@ -1,5 +1,5 @@
 import logging
-from groq import Groq
+from openai import OpenAI
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -34,12 +34,11 @@ def get_llm_response(
     max_tokens: int = None
 ) -> str:
     """
-    Sends a prompt to the Groq LLM and returns the response text.
+    Sends a prompt to OpenAI LLM and returns the response text.
     Supports optional model override, response_format (e.g. {"type": "json_object"}), temperature, and max_tokens.
-    Includes fallback retry if Groq's strict server-side json_object validation fails.
     """
-    target_model = model or settings.groq_model
-    client = Groq(api_key=settings.groq_api_key)
+    target_model = model or settings.openai_model
+    client = OpenAI(api_key=settings.openai_api_key)
 
     messages = []
     if system_prompt:
@@ -55,7 +54,7 @@ def get_llm_response(
     if temperature is not None:
         kwargs["temperature"] = temperature
     if max_tokens is not None:
-        kwargs["max_completion_tokens"] = max_tokens
+        kwargs["max_tokens"] = max_tokens
 
     try:
         logger.info(f"Calling LLM ({target_model})")
@@ -72,30 +71,5 @@ def get_llm_response(
         return _clean_json_string(content)
 
     except Exception as e:
-        err_msg = str(e)
-        # Fallback: If Groq's strict json_object validation failed (HTTP 400 json_validate_failed),
-        # retry without the strict response_format parameter.
-        if response_format and ("json_validate_failed" in err_msg or "400" in err_msg):
-            logger.warning(f"Groq json_object validation error ({e}). Retrying request without response_format constraint...")
-            try:
-                kwargs_no_fmt = {
-                    "model": target_model,
-                    "messages": messages,
-                }
-                if temperature is not None:
-                    kwargs_no_fmt["temperature"] = temperature
-                response = client.chat.completions.create(**kwargs_no_fmt)
-                choice = response.choices[0]
-                content = choice.message.content
-
-                logger.info(
-                    "LLM response finish_reason=%s | content_length=%s",
-                    choice.finish_reason,
-                    len(content or "")
-                )
-
-                return _clean_json_string(content)
-            except Exception as retry_err:
-                raise LLMServiceError(f"Failed to get response from LLM on fallback retry: {retry_err}") from retry_err
-
+        logger.error(f"OpenAI API request failed: {e}")
         raise LLMServiceError(f"Failed to get response from LLM: {e}") from e

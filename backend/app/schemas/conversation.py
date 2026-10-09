@@ -103,6 +103,10 @@ class StartResponse(BaseModel):
         default=None,
         description="The requirement ID associated with the clarifying question."
     )
+    session_intro: Optional[str] = Field(
+        default=None,
+        description="Dynamic session introduction sentence based on available context."
+    )
 
 
 class ReplyRequest(BaseModel):

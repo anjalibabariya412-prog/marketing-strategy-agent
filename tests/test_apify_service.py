@@ -18,42 +18,41 @@ def run_async(coro):
 
 
 def test_apify_service():
-    print("=== Testing Task 4: Apify Service Integration & Actor Routing ===")
+    print("=== Testing Apify Service Integration & Social Media Actor Routing ===")
 
-    # Setup parsed URLs for each platform
     website_url = ParsedURL(original_url="https://example.com", normalized_url="https://example.com", platform="website", is_valid=True)
     instagram_url = ParsedURL(original_url="https://instagram.com/brand", normalized_url="https://instagram.com/brand", platform="instagram", is_valid=True)
     facebook_url = ParsedURL(original_url="https://facebook.com/brand", normalized_url="https://facebook.com/brand", platform="facebook", is_valid=True)
     linkedin_url = ParsedURL(original_url="https://linkedin.com/company/brand", normalized_url="https://linkedin.com/company/brand", platform="linkedin", is_valid=True)
     invalid_url = ParsedURL(original_url="invalid_string", normalized_url=None, platform="unknown", is_valid=False, error="Invalid URL")
 
-    with patch("backend.app.services.apify_service.settings") as mock_settings:
-        mock_settings.apify_api_key = "mock_apify_token_xyz"
-        mock_settings.apify_api_token = "mock_apify_token_xyz"
+    with patch("backend.app.services.apify_service.settings") as mock_apify_settings, \
+         patch("backend.app.services.firecrawl_service.settings") as mock_firecrawl_settings:
+
+        mock_apify_settings.apify_api_key = "mock_apify_token_xyz"
+        mock_apify_settings.apify_api_token = "mock_apify_token_xyz"
+        mock_firecrawl_settings.firecrawl_api_key = "mock_firecrawl_key_123"
 
         # -------------------------------------------------------------
-        # Test 1: Website URL -> Actor: apify/website-content-crawler
+        # Test 1: Website URL -> Dispatched to Firecrawl service
         # -------------------------------------------------------------
-        with patch("backend.app.services.apify_service.ApifyClientAsync") as mock_client_cls:
-            mock_client_instance = MagicMock()
-            mock_actor = MagicMock()
-            mock_dataset = MagicMock()
+        with patch("backend.app.services.firecrawl_service.Firecrawl") as mock_firecrawl_cls, \
+             patch("backend.app.services.apify_service.ApifyClientAsync") as mock_apify_cls:
 
-            mock_client_cls.return_value = mock_client_instance
-            mock_client_instance.actor.return_value = mock_actor
-            mock_client_instance.dataset.return_value = mock_dataset
-
-            mock_actor.call = AsyncMock(return_value={"defaultDatasetId": "ds_web_123"})
-            mock_dataset.list_items = AsyncMock(return_value=MagicMock(items=[{"text": "Sample website content"}]))
+            mock_firecrawl_inst = MagicMock()
+            mock_firecrawl_cls.return_value = mock_firecrawl_inst
+            mock_firecrawl_inst.map.return_value = MagicMock(links=[{"url": "https://example.com"}])
+            mock_firecrawl_inst.batch_scrape.return_value = MagicMock(data=[
+                MagicMock(model_dump=lambda: {"markdown": "Content", "metadata": {"url": "https://example.com"}})
+            ])
 
             res = run_async(scrape_single_parsed_url(website_url))
 
-            mock_client_instance.actor.assert_called_with("apify/website-content-crawler")
-            mock_actor.call.assert_called_with(run_input={"startUrls": [{"url": "https://example.com"}], "maxCrawlPages": 3})
+            mock_firecrawl_cls.assert_called_with(api_key="mock_firecrawl_key_123")
+            mock_apify_cls.assert_not_called()
             assert res.success is True
             assert res.platform == "website"
-            assert res.data == [{"text": "Sample website content"}]
-            print("✓ Test 1 Passed: Website URL routed to 'apify/website-content-crawler'")
+            print("✓ Test 1 Passed: Website URL routed to Firecrawl service")
 
         # -------------------------------------------------------------
         # Test 2: Instagram URL -> Actor: apify/instagram-scraper
@@ -149,7 +148,7 @@ def test_apify_service():
             mock_actor.call = AsyncMock(return_value={"defaultDatasetId": "ds_empty"})
             mock_dataset.list_items = AsyncMock(return_value=MagicMock(items=[]))
 
-            res_empty = run_async(scrape_single_parsed_url(website_url))
+            res_empty = run_async(scrape_single_parsed_url(instagram_url))
             assert res_empty.success is False
             assert res_empty.data == []
             assert "empty dataset" in res_empty.error
@@ -158,7 +157,16 @@ def test_apify_service():
         # -------------------------------------------------------------
         # Test 7: Batch request with mixed URLs and failure resilience
         # -------------------------------------------------------------
-        with patch("backend.app.services.apify_service.ApifyClientAsync") as mock_client_cls:
+        with patch("backend.app.services.apify_service.ApifyClientAsync") as mock_client_cls, \
+             patch("backend.app.services.firecrawl_service.Firecrawl") as mock_firecrawl_cls:
+
+            mock_firecrawl_inst = MagicMock()
+            mock_firecrawl_cls.return_value = mock_firecrawl_inst
+            mock_firecrawl_inst.map.return_value = MagicMock(links=[{"url": "https://example.com"}])
+            mock_firecrawl_inst.batch_scrape.return_value = MagicMock(data=[
+                MagicMock(model_dump=lambda: {"markdown": "Web", "metadata": {"url": "https://example.com"}})
+            ])
+
             mock_client_instance = MagicMock()
             mock_actor = MagicMock()
             mock_dataset = MagicMock()
@@ -167,24 +175,20 @@ def test_apify_service():
             mock_client_instance.actor.return_value = mock_actor
             mock_client_instance.dataset.return_value = mock_dataset
 
-            # First call succeeds, second fails with exception, third is invalid (skipped)
-            mock_actor.call = AsyncMock(side_effect=[
-                {"defaultDatasetId": "ds_1"},
-                RuntimeError("Apify connection timeout"),
-            ])
-            mock_dataset.list_items = AsyncMock(return_value=MagicMock(items=[{"item": "val"}]))
+            mock_actor.call = AsyncMock(side_effect=RuntimeError("Apify connection timeout"))
 
             urls = [website_url, instagram_url, invalid_url]
             results = run_async(scrape_parsed_urls(urls))
 
             assert len(results) == 3
             assert results[0].success is True
+            assert results[0].platform == "website"
             assert results[1].success is False
             assert "Apify connection timeout" in results[1].error
             assert results[2].success is False
             print("✓ Test 7 Passed: Batch processing handles individual failures without crashing whole request")
 
-    print("\n=== All Task 4 Apify Service Unit Tests Passed Successfully! ===")
+    print("\n=== All Apify Service Unit Tests Passed Successfully! ===")
 
 
 if __name__ == "__main__":

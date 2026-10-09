@@ -3,16 +3,20 @@ uvicorn[standard]
 
 langgraph
 langchain
-langchain-groq
+
 
 pydantic
 pydantic-settings
 
 python-dotenv
-groq
 psycopg-binary
 langgraph-checkpoint-postgres
 
 pdfplumber
 python-multipart
-apify-client
+apify-client
+openai
+SQLAlchemy
+alembic
+psycopg[binary]
+firecrawl-py

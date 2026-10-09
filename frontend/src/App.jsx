@@ -120,6 +120,21 @@ const Icons = {
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
     </svg>
+  ),
+  Bot: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="10" rx="2" />
+      <circle cx="12" cy="5" r="2" />
+      <path d="M12 7v4" />
+      <line x1="8" y1="16" x2="8.01" y2="16" />
+      <line x1="16" y1="16" x2="16.01" y2="16" />
+    </svg>
+  ),
+  User: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
   )
 };
 
@@ -341,7 +356,9 @@ function App() {
 
   const fileInputRef = useRef(null);
 
-  // Question Wizard State
+  // Question Wizard State & Chat Message History
+  const [messages, setMessages] = useState([]);
+  const [sessionIntro, setSessionIntro] = useState(null);
   const [threadId, setThreadId] = useState(null);
   const [showIntroScreen, setShowIntroScreen] = useState(false);
   const [status, setStatus] = useState(null);
@@ -426,6 +443,8 @@ function App() {
   }
 
   const answerTextareaRef = useRef(null);
+  const chatMessagesRef = useRef(null);
+  const messagesEndRef = useRef(null);
 
   // File Upload Handler
   const handleFileChange = async (e) => {
@@ -490,10 +509,19 @@ function App() {
   };
 
   useEffect(() => {
-    if (threadId && !showIntroScreen && !isCompleted && !isTransitioningToStrategy) {
+    if (chatMessagesRef.current) {
+      chatMessagesRef.current.scrollTo({
+        top: chatMessagesRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, [messages, questionLoading]);
+
+  useEffect(() => {
+    if (threadId && !showIntroScreen && !isCompleted && !isTransitioningToStrategy && !questionLoading) {
       answerTextareaRef.current?.focus();
     }
-  }, [currentQuestion, threadId, showIntroScreen, isCompleted, isTransitioningToStrategy]);
+  }, [currentQuestion, threadId, showIntroScreen, isCompleted, isTransitioningToStrategy, questionLoading]);
 
   useEffect(() => {
     if (isCompleted && threadId) {
@@ -571,6 +599,7 @@ function App() {
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
+    setMessages([]);
     setFormSubmitting(true);
     setStartError(null);
 
@@ -605,6 +634,7 @@ function App() {
 
       const data = await response.json();
       if (data.thread_id) setThreadId(data.thread_id);
+      if (data.session_intro) setSessionIntro(data.session_intro);
       setStatus(data.status);
       setRequirementId(data.requirement_id || null);
 
@@ -612,6 +642,15 @@ function App() {
         setIsTransitioningToStrategy(true);
         setTimeout(() => setIsCompleted(true), 6000);
       } else if (data.question) {
+        const initialAgentMsg = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+          sender: 'agent',
+          content: data.question,
+          requirementId: data.requirement_id || null,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages([initialAgentMsg]);
+
         setCurrentQuestion(data.question);
         setQuestionNumber(1);
         setAnswerInput('');
@@ -629,6 +668,16 @@ function App() {
     if (!answerInput.trim() || questionLoading) return;
 
     const messageText = answerInput.trim();
+    const activeReqId = requirementId || null;
+    const userMsg = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      sender: 'user',
+      content: messageText,
+      requirementId: activeReqId,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+
     setQuestionLoading(true);
     setQuestionError(null);
 
@@ -656,6 +705,15 @@ function App() {
         setIsTransitioningToStrategy(true);
         setTimeout(() => setIsCompleted(true), 6000);
       } else if (data.question) {
+        const nextAgentMsg = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+          sender: 'agent',
+          content: data.question,
+          requirementId: data.requirement_id || null,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, nextAgentMsg]);
+
         setQuestionNumber((prev) => prev + 1);
         setCurrentQuestion(data.question);
         setAnswerInput('');
@@ -915,14 +973,15 @@ function App() {
               <div className="form-actions">
                 <button
                   type="submit"
-                  className="btn-primary btn-start"
+                  className={`btn-primary btn-start ${formSubmitting ? 'is-submitting' : ''}`}
                   disabled={formSubmitting || fileUploading}
                 >
                   {formSubmitting ? (
                     <span className="btn-loading-content">
-                      <svg className="green-circular-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9" stroke="rgba(22, 163, 74, 0.25)" strokeWidth="3" />
-                        <path d="M12 3a9 9 0 0 1 9 9" stroke="#16a34a" strokeWidth="3" strokeLinecap="round" />
+                      <span className="btn-shimmer-sweep" aria-hidden="true" />
+                      <svg className="btn-circular-spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" stroke="rgba(255, 255, 255, 0.35)" strokeWidth="2.5" />
+                        <path d="M12 3a9 9 0 0 1 9 9" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" />
                       </svg>
                       <span>Analyzing your business</span>
                     </span>
@@ -936,19 +995,9 @@ function App() {
             </form>
           </div>
         ) : (
-          /* Question Wizard View */
-          <div className="card question-card">
-            {showIntroScreen ? (
-              <div className="intro-card-content">
-                <h2 className="intro-heading">Let's build your strategy</h2>
-                <p className="intro-text">
-                  Thanks for sharing the basics about your business. To create a strategy tailored to your needs, I'll ask a few focused follow-up questions.
-                </p>
-                <button type="button" className="btn-primary btn-continue" onClick={() => setShowIntroScreen(false)}>
-                  Continue →
-                </button>
-              </div>
-            ) : isTransitioningToStrategy ? (
+          /* Chatbot Conversation View */
+          <div className="card chat-card">
+            {isTransitioningToStrategy ? (
               <div className="transition-container">
                 <h2 className="transition-title">Creating your personalized marketing strategy</h2>
                 <p className="transition-text">Analyzing your business context, competitors, and goals...</p>
@@ -959,23 +1008,85 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="question-card-content">
-                <div className="question-step-label">Question {questionNumber}</div>
-                <h2 className="question-heading">{currentQuestion}</h2>
-                <textarea
-                  ref={answerTextareaRef}
-                  className="question-textarea"
-                  value={answerInput}
-                  onChange={(e) => setAnswerInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Type your answer here..."
-                  disabled={questionLoading}
-                  rows={5}
-                />
-                {questionError && <div className="error-banner">{questionError}</div>}
-                <div className="question-actions">
-                  <button type="button" className="btn-primary btn-next" onClick={handleNextQuestion} disabled={questionLoading || !answerInput.trim()}>
-                    {questionLoading ? 'Thinking...' : 'Next →'}
+              <div className="chat-container">
+                {/* Chat Header */}
+                <div className="chat-header">
+                  <h2 className="chat-header-title">Marketing Strategy Agent</h2>
+                </div>
+
+                {/* Dynamic Session Intro (Session-level metadata, NOT stored in messages array) */}
+                {sessionIntro && (
+                  <div className="chat-session-intro-banner">
+                    <p className="chat-session-intro-text">{sessionIntro}</p>
+                  </div>
+                )}
+
+                {/* Chat Messages Feed */}
+                <div className="chat-messages-container" ref={chatMessagesRef}>
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`chat-message-row ${message.sender === 'agent' ? 'agent-row' : 'user-row'}`}
+                    >
+                      {message.sender === 'agent' ? (
+                        <div className="chat-avatar agent-avatar" aria-hidden="true">
+                          <Icons.Bot />
+                        </div>
+                      ) : null}
+                      <div className={`chat-bubble ${message.sender === 'agent' ? 'agent-bubble' : 'user-bubble'}`}>
+                        <p className="chat-bubble-text">{message.content}</p>
+                      </div>
+                      {message.sender === 'user' ? (
+                        <div className="chat-avatar user-avatar" aria-hidden="true">
+                          <Icons.User />
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+
+                  {/* Temporary Thinking Indicator (does not mutate messages array) */}
+                  {questionLoading && (
+                    <div className="chat-message-row agent-row thinking-row">
+                      <div className="chat-avatar agent-avatar" aria-hidden="true">
+                        <Icons.Bot />
+                      </div>
+                      <div className="chat-bubble agent-bubble thinking-bubble">
+                        <div className="typing-dots" aria-label="Thinking">
+                          <span className="dot" />
+                          <span className="dot" />
+                          <span className="dot" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {questionError && <div className="error-banner chat-error-banner">{questionError}</div>}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Chat Composer */}
+                <div className="chat-composer-container">
+                  <textarea
+                    ref={answerTextareaRef}
+                    className="chat-textarea"
+                    value={answerInput}
+                    onChange={(e) => setAnswerInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Type your answer here..."
+                    disabled={questionLoading}
+                    rows={2}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary chat-send-btn"
+                    onClick={handleNextQuestion}
+                    disabled={questionLoading || !answerInput.trim()}
+                  >
+                    <span>Send</span>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <line x1="22" y1="2" x2="11" y2="13" />
+                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
                   </button>
                 </div>
               </div>
