@@ -267,6 +267,42 @@ def generate_strategy(state: MarketingAgentState) -> MarketingStrategy:
                     op_lines.append(f"  {src_name} Marketing Content: {', '.join(src_obj.marketing_content)}")
                 if src_obj.other_strategy_relevant_information:
                     op_lines.append(f"  {src_name} Other Info: {', '.join(src_obj.other_strategy_relevant_information)}")
+                if src_name == "Instagram":
+                    if src_obj.profile:
+                        prof = src_obj.profile
+                        prof_parts = []
+                        if prof.get("username"):
+                            prof_parts.append(f"@{prof.get('username')}")
+                        if prof.get("fullName"):
+                            prof_parts.append(f"Name: {prof.get('fullName')}")
+                        if prof.get("followersCount") is not None:
+                            prof_parts.append(f"Followers: {prof.get('followersCount')}")
+                        if prof.get("postsCount") is not None:
+                            prof_parts.append(f"Posts: {prof.get('postsCount')}")
+                        if prof.get("biography"):
+                            prof_parts.append(f"Bio: {prof.get('biography')}")
+                        if prof_parts:
+                            op_lines.append(f"  Instagram Profile: {' | '.join(prof_parts)}")
+                    if src_obj.posts:
+                        op_lines.append(f"  Instagram Posts ({len(src_obj.posts)} tracked)")
+                elif src_name == "Facebook":
+                    if src_obj.profile:
+                        prof = src_obj.profile
+                        prof_parts = []
+                        if prof.get("pageName"):
+                            prof_parts.append(f"Page: {prof.get('pageName')}")
+                        if prof.get("username"):
+                            prof_parts.append(f"@{prof.get('username')}")
+                        if prof.get("followersCount") is not None:
+                            prof_parts.append(f"Followers: {prof.get('followersCount')}")
+                        if prof.get("likesCount") is not None:
+                            prof_parts.append(f"Likes: {prof.get('likesCount')}")
+                        if prof.get("about"):
+                            prof_parts.append(f"About: {prof.get('about')}")
+                        if prof_parts:
+                            op_lines.append(f"  Facebook Page: {' | '.join(prof_parts)}")
+                    if src_obj.posts:
+                        op_lines.append(f"  Facebook Posts ({len(src_obj.posts)} tracked)")
 
         prompt_parts.extend([
             "\nONLINE PRESENCE CONTEXT (SCRAPED FROM VERIFIED LINKS):",

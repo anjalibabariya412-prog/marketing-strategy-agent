@@ -1,4 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import './App.css';
 
 
@@ -167,7 +170,7 @@ const toItemArray = (val) => {
 };
 
 
-// Component: Generic Smart Section Renderer — renders an array of plain-text items as a bullet list
+// Component: Generic Smart Section Renderer — renders markdown content formatted cleanly
 const SmartSectionRenderer = ({ content }) => {
   const items = toItemArray(content);
 
@@ -175,21 +178,28 @@ const SmartSectionRenderer = ({ content }) => {
     return <p className="section-text-empty">No details provided for this section.</p>;
   }
 
-  if (items.length === 1) {
-    return (
-      <div className="report-markdown-body">
-        <p className="md-p">{items[0]}</p>
-      </div>
-    );
-  }
+  const markdownText = items.join('\n\n');
 
   return (
     <div className="report-markdown-body">
-      <ul className="md-ul">
-        {items.map((item, idx) => (
-          <li key={idx} className="md-li">{item}</li>
-        ))}
-      </ul>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        components={{
+          p: ({ node, ...props }) => <p className="md-p" {...props} />,
+          h3: ({ node, ...props }) => <h3 className="md-h3" {...props} />,
+          h4: ({ node, ...props }) => <h4 className="md-h4" {...props} />,
+          h5: ({ node, ...props }) => <h5 className="md-h5" {...props} />,
+          ul: ({ node, ...props }) => <ul className="md-ul" {...props} />,
+          ol: ({ node, ...props }) => <ol className="md-ol" {...props} />,
+          li: ({ node, ...props }) => <li className="md-li" {...props} />,
+          strong: ({ node, ...props }) => <strong className="md-strong" {...props} />,
+          em: ({ node, ...props }) => <em className="md-em" {...props} />,
+          blockquote: ({ node, ...props }) => <blockquote className="md-blockquote" {...props} />,
+          a: ({ node, ...props }) => <a className="md-link" target="_blank" rel="noopener noreferrer" {...props} />,
+        }}
+      >
+        {markdownText}
+      </ReactMarkdown>
     </div>
   );
 };
@@ -293,7 +303,18 @@ const ActionPlanRenderer = ({ content }) => {
             {idx < items.length - 1 && <span className="timeline-line" />}
           </div>
           <div className="timeline-content-column">
-            <p className="timeline-item">{item}</p>
+            <div className="timeline-item">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkBreaks]}
+                components={{
+                  p: ({ node, ...props }) => <span {...props} />,
+                  strong: ({ node, ...props }) => <strong className="md-strong" {...props} />,
+                  em: ({ node, ...props }) => <em className="md-em" {...props} />,
+                }}
+              >
+                {item}
+              </ReactMarkdown>
+            </div>
           </div>
         </div>
       ))}
@@ -317,7 +338,18 @@ const ValuePropositionRenderer = ({ content }) => {
           <div className="value-prop-hero-icon">
             <Icons.ValueProp />
           </div>
-          <div className="value-prop-hero-text">{heroText}</div>
+          <div className="value-prop-hero-text">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkBreaks]}
+              components={{
+                p: ({ node, ...props }) => <span {...props} />,
+                strong: ({ node, ...props }) => <strong className="md-strong" {...props} />,
+                em: ({ node, ...props }) => <em className="md-em" {...props} />,
+              }}
+            >
+              {heroText}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
 
@@ -361,6 +393,8 @@ function App() {
   const [sessionIntro, setSessionIntro] = useState(null);
   const [threadId, setThreadId] = useState(null);
   const [showIntroScreen, setShowIntroScreen] = useState(false);
+  const [showSummaryScreen, setShowSummaryScreen] = useState(false);
+  const [businessSummaryText, setBusinessSummaryText] = useState('');
   const [status, setStatus] = useState(null);
   const [requirementId, setRequirementId] = useState(null);
   const [questionNumber, setQuestionNumber] = useState(1);
@@ -560,6 +594,40 @@ function App() {
     }
   };
 
+  const extractBusinessSummary = (fullQuestionText) => {
+    if (!fullQuestionText) return '';
+    const parts = fullQuestionText.split('\n\n');
+    if (parts.length >= 3 && parts[0].toLowerCase().includes('summary')) {
+      return parts.slice(1, -1).join('\n\n').trim();
+    } else if (parts.length === 2 && parts[0].toLowerCase().includes('summary')) {
+      return parts[0].trim();
+    }
+    const lines = fullQuestionText.split('\n');
+    if (lines.length > 2 && lines[0].toLowerCase().includes('summary')) {
+      return lines.slice(1, -1).join('\n').trim();
+    }
+    return fullQuestionText.trim();
+  };
+
+  const extractDynamicQuestion = (fullQuestionText) => {
+    if (!fullQuestionText) return '';
+    const parts = fullQuestionText.split('\n\n');
+    if (parts.length >= 3 && parts[0].toLowerCase().includes('summary')) {
+      return parts[parts.length - 1].trim();
+    } else if (parts.length === 2 && parts[0].toLowerCase().includes('summary')) {
+      return parts[1].trim();
+    }
+    const lines = fullQuestionText.split('\n');
+    if (lines.length > 2 && lines[0].toLowerCase().includes('summary')) {
+      return lines[lines.length - 1].trim();
+    }
+    return fullQuestionText.trim();
+  };
+
+  const handleContinueFromSummary = () => {
+    setShowSummaryScreen(false);
+  };
+
   const handleStartSubmit = async (e) => {
     e.preventDefault();
     if (formSubmitting || fileUploading) return;
@@ -642,19 +710,27 @@ function App() {
         setIsTransitioningToStrategy(true);
         setTimeout(() => setIsCompleted(true), 6000);
       } else if (data.question) {
-        const initialAgentMsg = {
-          id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        const summaryContent = extractBusinessSummary(data.question);
+        const dynamicQuestion = extractDynamicQuestion(data.question);
+        setBusinessSummaryText(summaryContent);
+
+        const staticIntroText = "Hi! Let's personalize your marketing strategy with a few quick questions based on your business and goals.";
+        const combinedInitialContent = `${staticIntroText}\n\n${dynamicQuestion}`;
+
+        const combinedInitialMsg = {
+          id: `msg_q1_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
           sender: 'agent',
-          content: data.question,
+          content: combinedInitialContent,
           requirementId: data.requirement_id || null,
           timestamp: new Date().toISOString(),
         };
-        setMessages([initialAgentMsg]);
 
-        setCurrentQuestion(data.question);
+        setMessages([combinedInitialMsg]);
+
+        setCurrentQuestion(dynamicQuestion);
         setQuestionNumber(1);
         setAnswerInput('');
-        setShowIntroScreen(true);
+        setShowSummaryScreen(true);
       }
     } catch (err) {
       console.error('Failed to start conversation:', err);
@@ -668,6 +744,8 @@ function App() {
     if (!answerInput.trim() || questionLoading) return;
 
     const messageText = answerInput.trim();
+    setAnswerInput('');
+
     const activeReqId = requirementId || null;
     const userMsg = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -716,10 +794,10 @@ function App() {
 
         setQuestionNumber((prev) => prev + 1);
         setCurrentQuestion(data.question);
-        setAnswerInput('');
       }
     } catch (err) {
       console.error('Failed to send answer:', err);
+      setAnswerInput(messageText);
       setQuestionError(err.message || 'Failed to send answer. Please try again.');
     } finally {
       setQuestionLoading(false);
@@ -993,6 +1071,38 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        ) : showSummaryScreen ? (
+          /* Business Summary Transition Screen */
+          <div className="card summary-card">
+            <div className="summary-card-header">
+              <h2 className="summary-title">Your business overview is ready!</h2>
+              <p className="summary-intro">Hi! Let's get started on your marketing plan.</p>
+            </div>
+
+            <div className="summary-section">
+              <h3 className="summary-section-heading">Here's what we understood about your business:</h3>
+              <div className="summary-body-box">
+                <p className="summary-text-content">{businessSummaryText}</p>
+              </div>
+            </div>
+
+            <div className="summary-next-section">
+              <h3 className="summary-next-heading">What's next?</h3>
+              <p className="summary-next-explanation">
+                To build a marketing strategy tailored to your business, we'll ask a few additional questions based on your goals and the information we've gathered. Your answers will help us identify opportunities and develop a more relevant strategy.
+              </p>
+            </div>
+
+            <div className="summary-actions">
+              <button
+                type="button"
+                className="btn-primary btn-start btn-continue-summary"
+                onClick={handleContinueFromSummary}
+              >
+                <span>Continue →</span>
+              </button>
+            </div>
           </div>
         ) : (
           /* Chatbot Conversation View */

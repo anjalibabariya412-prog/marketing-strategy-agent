@@ -13,7 +13,7 @@ from backend.app.models.scraped_result import ApifyScrapeResult
 logger = logging.getLogger(__name__)
 
 # Default crawl page limit
-DEFAULT_CRAWL_LIMIT = 2
+DEFAULT_CRAWL_LIMIT = 10
 
 # Tracking query parameters to strip
 TRACKING_PARAMS = {
@@ -357,7 +357,6 @@ async def scrape_website_url(
             page_item = {
                 "url": page_url,
                 "title": page_title,
-                "text": markdown_content,
                 "markdown": markdown_content,
                 "description": page_desc,
                 "metadata": metadata,

@@ -254,8 +254,8 @@ def test_firecrawl_and_routing():
             item = res.data[0]
             assert item["url"] == "https://example.com/products"
             assert item["title"] == "Products"
-            assert item["text"] == "# Main Product Page"
             assert item["markdown"] == "# Main Product Page"
+            assert "text" not in item
             assert item["description"] == "Our product line"
 
             formatted_prompt = _format_scraped_data_for_prompt([res])

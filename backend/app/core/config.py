@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"  # default if not set in .env
 
     # Maximum clarifying questions limit before forcing strategy generation
-    max_questions: int = 6
+    max_questions: int = 4
 
     # Flag to enable 1-call-per-turn optimization (merged answer processing + next question planning)
     merged_turn_call_enabled: bool = True
