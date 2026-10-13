@@ -5,7 +5,12 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from backend.app.models.business_context import BusinessContext
-from backend.app.models.online_presence import OnlinePresenceContext, OnlineSourceSummary
+from backend.app.models.online_presence import (
+    MarketingEvidence,
+    OnlinePresenceContext,
+    OnlineSourceSummary,
+    VerificationStatus,
+)
 from backend.app.models.parsed_url import ParsedURL
 from backend.app.models.scraped_result import ApifyScrapeResult
 from backend.app.services.llm_service import get_llm_response, LLMServiceError
@@ -21,7 +26,20 @@ ONLINE_PRESENCE_SYSTEM_PROMPT = (
     "2. The LLM must NOT invent products, prices, competitors, features, marketing channels, customer behavior, engagement metrics, or performance results.\n"
     "3. CONTEXT-AWARE EVALUATION: Use the provided business name, product/service, and target audience to identify relevant information. Recognize that a website may contain multiple products/services; prioritize details relevant to the target product/service when found, but do not ignore other legitimate business offerings.\n"
     "4. IF INFORMATION IS MISSING OR LIMITED: If specific information (e.g., pricing, positioning, or specific campaigns) is not found in the scraped data for a platform, leave that list empty or state that it was not found. Do not fill empty lists with generic filler.\n"
-    "5. FAILED / ABSENT SOURCES: If a platform (website, instagram, facebook, or linkedin) has no scraped data or failed scraping, set its key to null in the output.\n\n"
+    "5. FAILED / ABSENT SOURCES: If a platform (website, instagram, facebook, or linkedin) has no scraped data or failed scraping, set its key to null in the output.\n"
+    "6. CLAIM-LEVEL EVIDENCE & CONDITIONS PRESERVATION:\n"
+    "   For any promotional claims, discounts, free shipping offers, guarantees, or special value propositions found in scraped content, extract structured 'evidence' records under 'website' (and other platforms if applicable).\n"
+    "   Each evidence record MUST contain:\n"
+    "   - 'claim': Concise description of the claim (e.g. 'Free standard shipping on orders above ₹350', '10% discount on first coffee purchase').\n"
+    "   - 'source_url': The exact URL of the specific scraped page where this claim or passage was found. Do NOT invent or generalize URLs.\n"
+    "   - 'supporting_text': The exact quote or passage from the retrieved content demonstrating the claim (e.g. 'FREE STANDARD SHIPPING on all prepaid orders above ₹350').\n"
+    "   - 'conditions': Any restrictions, eligibility criteria, payment method constraints, minimum order values, or terms attached to the claim (e.g. 'Prepaid orders only', 'First coffee purchase only; use code TRY10', 'Minimum order ₹350'). If no conditions are stated in the source, set to null. Extract conditions ONLY when supported by retrieved text; do not invent them.\n"
+    "   - 'verification_status': Must be one of:\n"
+    "     * 'supported': The exact text directly corroborates the claim and its stated terms.\n"
+    "     * 'partially_supported': The claim is mentioned but with significant caveats, restrictions, or assumptions not fully matching the raw statement.\n"
+    "     * 'unsupported': The text contradicts the claim or does not substantiate it.\n"
+    "     * 'unresolved': The claim cannot be reliably verified or linked to the retrieved text.\n"
+    "   CRITICAL RULE: Do NOT treat information found on the live website but absent from retrieved scraped content as evidence. If a claim cannot be reliably linked to evidence in the retrieved text, mark it 'unresolved' or 'unsupported' rather than directly supported.\n\n"
     "REQUIRED JSON OUTPUT SCHEMA:\n"
     "You MUST respond ONLY with a valid JSON object strictly matching this schema:\n"
     "{\n"
@@ -31,14 +49,24 @@ ONLINE_PRESENCE_SYSTEM_PROMPT = (
     '    "relevant_products_or_services": ["Product 1", "Service 2"],\n'
     '    "marketing_content": ["Key theme or content topic"],\n'
     '    "positioning_or_messaging": ["Brand slogan or positioning statement"],\n'
-    '    "other_strategy_relevant_information": ["Additional insight"]\n'
+    '    "other_strategy_relevant_information": ["Additional insight"],\n'
+    '    "evidence": [\n'
+    '      {\n'
+    '        "claim": "Free standard shipping on orders above ₹350",\n'
+    '        "source_url": "https://example.com/products/item-1",\n'
+    '        "supporting_text": "FREE STANDARD SHIPPING on all prepaid orders above ₹350",\n'
+    '        "conditions": "Prepaid orders only",\n'
+    '        "verification_status": "supported"\n'
+    '      }\n'
+    '    ]\n'
     '  } | null,\n'
     '  "instagram": {\n'
     '    "summary": "Summary of Instagram content",\n'
     '    "relevant_products_or_services": [],\n'
     '    "marketing_content": [],\n'
     '    "positioning_or_messaging": [],\n'
-    '    "other_strategy_relevant_information": []\n'
+    '    "other_strategy_relevant_information": [],\n'
+    '    "evidence": []\n'
     '  } | null,\n'
     '  "facebook": null,\n'
     '  "linkedin": null\n'
@@ -258,10 +286,24 @@ def _format_facebook_post_item_for_prompt(item: dict) -> str:
     return " | ".join(parts)
 
 
+def _format_website_page_item_for_prompt(item: dict) -> str:
+    """Formats a scraped website page into a structured text snippet preserving page URL and markdown content."""
+    url = item.get("url") or item.get("source_url") or "URL not specified"
+    title = item.get("title") or ""
+    markdown_content = (item.get("markdown") or item.get("text") or item.get("content") or "").strip()
+
+    parts = [f"[Website Page URL: {url}]"]
+    if title and isinstance(title, str) and title.strip():
+        parts.append(f"Page Title: {title.strip()}")
+    if markdown_content and isinstance(markdown_content, str) and markdown_content.strip():
+        parts.append(f"Page Content:\n{markdown_content.strip()}")
+    return "\n".join(parts)
+
+
 def _format_scraped_data_for_prompt(scraped_results: List[ApifyScrapeResult]) -> str:
     """
-    Formats raw scraped dataset items from Apify results into a clean, text-based prompt snippet per platform.
-    Uses platform-specific formatting for Instagram and Facebook while retaining generic extraction for other sources.
+    Formats raw scraped dataset items from Apify/Firecrawl results into a clean, text-based prompt snippet per platform.
+    Uses platform-specific formatting for Website, Instagram, and Facebook while retaining generic extraction for other sources.
     """
     platform_texts = {}
 
@@ -272,7 +314,20 @@ def _format_scraped_data_for_prompt(scraped_results: List[ApifyScrapeResult]) ->
         platform = res.platform
         items_snippets = []
 
-        if platform == "instagram":
+        if platform == "website":
+            if isinstance(res.data, list):
+                for page in res.data[:10]:
+                    if isinstance(page, dict):
+                        snippet = _format_website_page_item_for_prompt(page)
+                        if snippet:
+                            items_snippets.append(snippet)
+                    elif isinstance(page, str):
+                        items_snippets.append(page.strip())
+            elif isinstance(res.data, dict):
+                snippet = _format_website_page_item_for_prompt(res.data)
+                if snippet:
+                    items_snippets.append(snippet)
+        elif platform == "instagram":
             if isinstance(res.data, list):
                 for entry in res.data:
                     if isinstance(entry, dict) and entry.get("type") == "profile":
@@ -333,7 +388,8 @@ def _format_scraped_data_for_prompt(scraped_results: List[ApifyScrapeResult]) ->
                     items_snippets.append(item.strip())
 
         if items_snippets:
-            platform_texts[platform] = "\n".join(items_snippets[:8])
+            separator = "\n\n--- NEXT PAGE ---\n\n" if platform == "website" else "\n"
+            platform_texts[platform] = separator.join(items_snippets[:8])
 
     if not platform_texts:
         return "No valid scraped data content available."
@@ -431,9 +487,65 @@ def _extract_facebook_data(
     return page_data, posts_data
 
 
+def _sanitize_evidence_list(
+    raw_evidence: Any,
+    fallback_url: Optional[str] = None
+) -> List[MarketingEvidence]:
+    """
+    Validates and safely coerces raw LLM-produced evidence records into MarketingEvidence instances.
+    Safely skips or repairs malformed entries so processing never crashes.
+    """
+    if not raw_evidence or not isinstance(raw_evidence, list):
+        return []
+
+    sanitized: List[MarketingEvidence] = []
+    for item in raw_evidence:
+        if not isinstance(item, dict):
+            continue
+
+        raw_claim = item.get("claim")
+        if not raw_claim or not str(raw_claim).strip():
+            continue
+        claim = str(raw_claim).strip()
+
+        source_url = str(item.get("source_url") or fallback_url or "").strip()
+        raw_supporting = item.get("supporting_text")
+        supporting_text = str(raw_supporting).strip() if raw_supporting else ""
+
+        conditions = item.get("conditions")
+        raw_status = item.get("verification_status")
+
+        # If supporting_text is missing or empty, status should be UNRESOLVED
+        if not supporting_text:
+            verification_status = VerificationStatus.UNRESOLVED
+        elif raw_status:
+            try:
+                verification_status = MarketingEvidence.normalize_status(raw_status)
+            except Exception:
+                verification_status = VerificationStatus.UNRESOLVED
+        else:
+            verification_status = VerificationStatus.SUPPORTED
+
+        try:
+            ev = MarketingEvidence(
+                claim=claim,
+                source_url=source_url,
+                supporting_text=supporting_text,
+                conditions=conditions,
+                verification_status=verification_status,
+            )
+            sanitized.append(ev)
+        except Exception as val_err:
+            logger.warning(f"Skipping malformed evidence entry: {item} - Error: {val_err}")
+
+    return sanitized
+
+
 def process_online_presence(
     scraped_results: List[ApifyScrapeResult],
-    business_context: BusinessContext
+    business_context: BusinessContext,
+    strategy_request_id: Optional[Any] = None,
+    conversation_id: Optional[Any] = None,
 ) -> Optional[OnlinePresenceContext]:
     """
     Processes raw Apify scrape results using LLM to extract a structured, grounded OnlinePresenceContext.
@@ -499,7 +611,10 @@ def process_online_presence(
         llm_output = get_llm_response(
             system_prompt=ONLINE_PRESENCE_SYSTEM_PROMPT,
             prompt=user_prompt,
-            temperature=0.2
+            temperature=0.2,
+            operation="online_presence_analysis",
+            strategy_request_id=strategy_request_id,
+            conversation_id=conversation_id,
         )
 
         cleaned_output = llm_output.strip()
@@ -512,7 +627,37 @@ def process_online_presence(
         cleaned_output = cleaned_output.strip()
 
         data = json.loads(cleaned_output)
+        if not isinstance(data, dict):
+            raise ValueError(f"LLM output is not a JSON dictionary: {type(data)}")
+
+        # Find primary website URL for fallback if needed
+        primary_website_url = None
+        for r in successful_results:
+            if r.platform == "website":
+                primary_website_url = r.original_url or r.normalized_url
+                break
+
+        # Sanitize evidence inside website if present
+        if "website" in data and isinstance(data["website"], dict):
+            data["website"]["evidence"] = _sanitize_evidence_list(
+                data["website"].get("evidence"), fallback_url=primary_website_url
+            )
+
+        # Sanitize top-level evidence if present
+        if "evidence" in data:
+            data["evidence"] = _sanitize_evidence_list(
+                data.get("evidence"), fallback_url=primary_website_url
+            )
+
         context_obj = OnlinePresenceContext.model_validate(data)
+
+        # Synchronize website evidence to top-level context_obj.evidence if not present
+        if context_obj.website and context_obj.website.evidence:
+            existing_keys = {(e.claim, e.source_url) for e in context_obj.evidence}
+            for ev in context_obj.website.evidence:
+                if (ev.claim, ev.source_url) not in existing_keys:
+                    context_obj.evidence.append(ev)
+                    existing_keys.add((ev.claim, ev.source_url))
 
         # Attach normalized Instagram profile and post datasets to context
         if instagram_profile or instagram_posts:
@@ -548,7 +693,10 @@ def process_online_presence(
                 context_obj.facebook.profile = facebook_page
                 context_obj.facebook.posts = facebook_posts
 
-        logger.info("Successfully generated and validated OnlinePresenceContext with Instagram and Facebook datasets.")
+        logger.info(
+            f"Successfully generated and validated OnlinePresenceContext with "
+            f"{len(context_obj.all_evidence)} verified evidence record(s)."
+        )
         return context_obj
 
     except Exception as e:
@@ -651,6 +799,26 @@ def save_online_presence_sources(
                     "profile": online_presence_ctx.facebook.profile,
                     "posts": online_presence_ctx.facebook.posts or [],
                 }
+            elif platform == "website":
+                evidence_data = []
+                if online_presence_ctx:
+                    if online_presence_ctx.website and online_presence_ctx.website.evidence:
+                        evidence_data = [ev.model_dump() for ev in online_presence_ctx.website.evidence]
+                    elif online_presence_ctx.evidence:
+                        evidence_data = [ev.model_dump() for ev in online_presence_ctx.evidence]
+
+                if isinstance(res.data, list):
+                    details_json = {"items": res.data}
+                    if evidence_data:
+                        details_json["evidence"] = evidence_data
+                elif isinstance(res.data, dict):
+                    details_json = dict(res.data)
+                    if evidence_data:
+                        details_json["evidence"] = evidence_data
+                else:
+                    details_json = {"raw": str(res.data)}
+                    if evidence_data:
+                        details_json["evidence"] = evidence_data
             elif isinstance(res.data, dict):
                 details_json = res.data
             elif isinstance(res.data, list):

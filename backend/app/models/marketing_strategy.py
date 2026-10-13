@@ -23,6 +23,22 @@ class BudgetItem(BaseModel):
         description="Full explanation of how this budget will be deployed."
     )
 
+    @field_validator("percentage", mode="before")
+    @classmethod
+    def format_percentage(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        v_str = str(v).strip()
+        if not v_str:
+            return None
+        if not v_str.endswith("%"):
+            try:
+                float(v_str)
+                return f"{v_str}%"
+            except ValueError:
+                pass
+        return v_str
+
 
 class KPIItem(BaseModel):
     """
@@ -122,7 +138,7 @@ class MarketingStrategy(BaseModel):
                         "percentage": None,
                         "description": item
                     })
-                elif isinstance(item, dict):
+                elif isinstance(item, (dict, BudgetItem)):
                     coerced.append(item)
             return coerced
         return v
@@ -143,7 +159,7 @@ class MarketingStrategy(BaseModel):
                         "target": "",
                         "description": item
                     })
-                elif isinstance(item, dict):
+                elif isinstance(item, (dict, KPIItem)):
                     coerced.append(item)
             return coerced
         return v

@@ -10,6 +10,7 @@ from backend.app.models.information_requirement import (
     create_dynamic_requirement,
     is_duplicate_requirement,
 )
+from backend.app.models.document_context import format_document_context
 from backend.app.models.online_presence import format_online_presence_context
 from backend.app.models.qa_turn import QATurn
 from backend.app.services.llm_service import get_llm_response, LLMServiceError
@@ -81,6 +82,7 @@ _PRIORITIZATION_SECTION = (
     "   - Do NOT select a requirement if its information is already adequately covered by business context, past marketing document summary, online presence context (website/social media scrape), or previous user answers.\n"
     "   - PRIORITY / CONFLICT RULE: User-provided explicit information strictly overrides scraped online presence information if they conflict.\n"
     "   - Do NOT ask for information already covered by online presence context (e.g. product features/USP, pricing, or current marketing channels).\n"
+    "   - HISTORICAL EVIDENCE VS CURRENT INPUTS: Historical document evidence reflects past campaigns and performance. Do NOT confuse historical PDF numbers (e.g. past budget, past campaigns) with current business parameters. Do NOT ask redundant questions about past campaigns already documented in the PDF, but DO ask questions needed for the current strategy if current information is missing.\n"
     "5. DYNAMIC REQUIREMENT CREATION RULES:\n"
     "   - Do NOT create a dynamic requirement if an existing requirement covers the topic, if nice-to-have, if already known, or if rephrasing an existing requirement.\n"
     "   - Create a dynamic requirement ONLY when: strategically important + genuinely missing + specific to this business + not covered by existing requirements."
@@ -136,7 +138,7 @@ COMPETITOR_EXTRACTION_SYSTEM_PROMPT = (
 )
 
 
-def extract_competitors(user_answer: str) -> List[str]:
+def extract_competitors(user_answer: str, conversation_id: Optional[str] = None) -> List[str]:
     """
     Extracts structured competitor names/alternatives from a natural language user response using LLM.
     Preserves exact user wording when a competitor cannot be named specifically (e.g. 'two local tiffin services').
@@ -151,7 +153,9 @@ def extract_competitors(user_answer: str) -> List[str]:
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=COMPETITOR_EXTRACTION_SYSTEM_PROMPT,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            operation="competitor_extraction",
+            conversation_id=conversation_id,
         )
 
         data = json.loads(raw_response)
@@ -207,7 +211,8 @@ def extract_initial_context(user_message: str) -> BusinessContext:
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=INITIAL_CONTEXT_SYSTEM_PROMPT,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            operation="initial_context_extraction",
         )
 
         data = json.loads(raw_response)
@@ -277,7 +282,9 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=ANSWER_CLASSIFICATION_SYSTEM_PROMPT,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            operation="answer_classification",
+            conversation_id=state.thread_id,
         )
 
         data = json.loads(raw_response)
@@ -300,7 +307,7 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
             logger.info(f"Requirement [{active_req_id}] updated to {final_status.value} with value: {final_value}")
 
         if active_req_id in ("competitive_landscape", "competitors") or "competitor" in str(active_req_id).lower():
-            comps = extract_competitors(user_answer)
+            comps = extract_competitors(user_answer, conversation_id=state.thread_id)
             if comps:
                 update_state_competitors(state, comps)
 
@@ -335,21 +342,26 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
         state.active_requirement_id = None
 
     except (LLMServiceError, json.JSONDecodeError, Exception) as e:
-        logger.error(f"process_answer_for_requirement error: {e}. Applying fallback status=KNOWN.")
+        logger.error(
+            f"process_answer_for_requirement error: {e}. "
+            f"Keeping requirement [{active_req_id}] unresolved (status=UNKNOWN)."
+        )
 
         if req:
-            req.status = RequirementStatus.KNOWN
-            req.value = user_answer.strip()
+            req.status = RequirementStatus.UNKNOWN
+            req.value = None
 
         qa_turn = QATurn(
             question=question_text or "",
             answer=user_answer.strip(),
-            requirement_id=active_req_id
+            requirement_id=None
         )
         state.qa_history.append(qa_turn)
 
         state.current_question = None
         state.active_requirement_id = None
+        state.pending_question = None
+        state.pending_requirement_id = None
 
 
 def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -> None:
@@ -387,8 +399,12 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
         f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
-        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}",
     ]
+    doc_str = format_document_context(state.document_context)
+    if ctx.past_marketing_document and not doc_str:
+        context_lines.append(f"Past marketing document summary: {ctx.past_marketing_document}")
+    if doc_str:
+        context_lines.append(f"\nHISTORICAL MARKETING EVIDENCE (FROM UPLOADED DOCUMENT):\n{doc_str}")
 
     op_str = format_online_presence_context(state.online_presence_context)
     if op_str:
@@ -461,7 +477,9 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=MERGED_TURN_SYSTEM_PROMPT,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            operation="merged_turn_processing",
+            conversation_id=state.thread_id,
         )
 
         data = json.loads(raw_response)

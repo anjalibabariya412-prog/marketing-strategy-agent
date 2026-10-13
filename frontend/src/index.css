@@ -1,63 +1,78 @@
-/* Global Reset & Theme Design Tokens: Forest Green & Gold Theme */
+/* Global Reset & Theme Design Tokens: Professional Blue-Tone SaaS Theme */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
   /* Fonts */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 
-  /* Brand Palette - Forest Green & Gold */
-  --color-forest-green: #305F50;
-  --color-forest-hover: #264E41;
-  --color-forest-active: #1D3D33;
-  --color-forest-light: #F2F6F3;
-  --color-forest-ring: rgba(48, 95, 80, 0.25);
+  /* Primary Brand Palette - Blue-Tone SaaS Theme */
+  --color-primary: #3C4790;
+  --color-primary-hover: #343E8A;
+  --color-primary-active: #2B3475;
+  --color-primary-ring: rgba(60, 71, 144, 0.2);
 
-  --color-gold: #D09B3D;
-  --color-gold-hover: #B8852F;
-  --color-gold-light: #FDF8EF;
-  --color-gold-border: #E8C88A;
+  /* Soft Blue Highlights */
+  --color-soft-blue: #E4E9FE;
+  --color-soft-blue-hover: #D7DEFE;
+  --color-soft-blue-border: #C7D2FE;
 
-  --color-soft-sage: #F2F6F3;
-  --color-charcoal-green: #26352F;
-  --color-muted-green: #84938B;
-  --color-border-neutral: #E0E7E2;
+  /* Backgrounds & Surfaces */
+  --color-bg-page: #F8FAFC;
+  --color-surface-white: #FFFFFF;
+
+  /* Typography / Text Contrast */
+  --color-text-primary: #1F2937;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+  --color-text-label: #1F2937;
+
+  /* Borders */
+  --color-border-subtle: #E2E8F0;
+  --color-border-input: #E2E8F0;
+  --color-border-focus: #3C4790;
+
+  /* Semantic Status Tokens */
+  --color-success: #10B981;
+  --color-success-bg: #ECFDF5;
+  --color-success-border: #A7F3D0;
+
+  --color-error: #EF4444;
+  --color-error-bg: #FEF2F2;
+  --color-error-border: #FECACA;
+
+  --color-disabled-bg: #F1F5F9;
+  --color-disabled-text: #94A3B8;
+  --color-disabled-border: #E2E8F0;
 
   /* Functional Token Mapping */
-  --color-primary-navy: var(--color-forest-green);
-  --color-text-primary: var(--color-charcoal-green);
-  --color-text-secondary: #4A5B53;
-  --color-text-muted: var(--color-muted-green);
-  --color-text-label: var(--color-charcoal-green);
+  --color-primary-navy: var(--color-primary);
+  --color-accent-blue: var(--color-primary);
+  --color-accent-hover: var(--color-primary-hover);
+  --color-accent-active: var(--color-primary-active);
+  --color-accent-light: var(--color-soft-blue);
+  --color-accent-ring: var(--color-primary-ring);
 
-  --color-accent-blue: var(--color-forest-green);
-  --color-accent-hover: var(--color-forest-hover);
-  --color-accent-active: var(--color-forest-active);
-  --color-accent-light: var(--color-soft-sage);
-  --color-accent-ring: var(--color-forest-ring);
+  /* Legacy Theme Aliases (Mapped to clean Blue SaaS tokens) */
+  --color-forest-green: var(--color-primary);
+  --color-forest-hover: var(--color-primary-hover);
+  --color-forest-active: var(--color-primary-active);
+  --color-forest-light: var(--color-soft-blue);
+  --color-forest-ring: var(--color-primary-ring);
 
-  --color-bg-page: #F6F8F6;
-  --color-surface-white: #ffffff;
-  
-  --color-border-subtle: var(--color-border-neutral);
-  --color-border-input: var(--color-border-neutral);
-  --color-border-focus: var(--color-forest-green);
+  --color-gold: var(--color-primary);
+  --color-gold-hover: var(--color-primary-hover);
+  --color-gold-light: var(--color-soft-blue);
+  --color-gold-border: var(--color-soft-blue-border);
 
-  --color-success: var(--color-forest-green);
-  --color-success-bg: var(--color-soft-sage);
-  --color-success-border: #C8D6CE;
+  --color-soft-sage: var(--color-soft-blue);
+  --color-charcoal-green: var(--color-text-primary);
+  --color-muted-green: var(--color-text-muted);
+  --color-border-neutral: var(--color-border-subtle);
 
-  --color-error: #dc2626;
-  --color-error-bg: #fef2f2;
-  --color-error-border: #fecaca;
-
-  --color-disabled-bg: #EFEFEF;
-  --color-disabled-text: #9EABA5;
-  --color-disabled-border: var(--color-border-neutral);
-
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(38, 53, 47, 0.05);
-  --shadow-card: 0 4px 20px -2px rgba(48, 95, 80, 0.08), 0 2px 6px -1px rgba(38, 53, 47, 0.04);
-  --shadow-focus: 0 0 0 3px var(--color-forest-ring);
+  /* Restrained SaaS Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 4px 16px -2px rgba(15, 23, 42, 0.05);
+  --shadow-focus: 0 0 0 3px var(--color-primary-ring);
 
   /* Border Radii */
   --radius-sm: 6px;

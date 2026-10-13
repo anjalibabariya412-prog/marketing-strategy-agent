@@ -9,6 +9,7 @@ from backend.app.models.information_requirement import (
     create_dynamic_requirement,
     is_duplicate_requirement,
 )
+from backend.app.models.document_context import format_document_context
 from backend.app.models.online_presence import format_online_presence_context
 from backend.app.services.llm_service import get_llm_response, LLMServiceError
 
@@ -28,20 +29,27 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
     if not missing_reqs:
         return True
 
-    # Build business context summary including past marketing document and online presence context
+    # Build business context summary including past marketing document, online presence context, and structured historical document context
     ctx = state.business_context
     op_str = format_online_presence_context(state.online_presence_context)
+    doc_str = format_document_context(state.document_context)
 
-    context_str = (
-        f"Company Name: {ctx.company_name or 'Not provided'}\n"
-        f"Product/Service: {ctx.product_or_service or 'Not provided'}\n"
-        f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}\n"
-        f"Target Audience: {ctx.target_audience or 'Not provided'}\n"
-        f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}\n"
-        f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}\n"
-        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}\n"
-        f"Online presence context (scraped/verified from website & social media): {op_str or 'Not provided'}"
-    )
+    context_lines = [
+        f"Company Name: {ctx.company_name or 'Not provided'}",
+        f"Product/Service: {ctx.product_or_service or 'Not provided'}",
+        f"Marketing Goal: {ctx.marketing_goal or 'Not provided'}",
+        f"Target Audience: {ctx.target_audience or 'Not provided'}",
+        f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
+        f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
+    ]
+    if ctx.past_marketing_document and not doc_str:
+        context_lines.append(f"Past marketing document summary: {ctx.past_marketing_document}")
+    if op_str:
+        context_lines.append(f"Online presence context (scraped/verified from website & social media): {op_str}")
+    if doc_str:
+        context_lines.append(f"\nHISTORICAL MARKETING EVIDENCE (FROM UPLOADED DOCUMENT):\n{doc_str}")
+
+    context_str = "\n".join(context_lines)
 
     # Format missing requirements for LLM evaluation including Must Have flag
     reqs_formatted = []
@@ -58,13 +66,20 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
 
     system_prompt = (
         "You are an expert marketing strategy consultant analyzing information requirements for a business.\n"
-        "Your goal is to evaluate missing marketing requirements against the known business context, past marketing document summary, "
+        "Your goal is to evaluate missing marketing requirements against the known business context, historical document evidence, "
         "and online presence context (scraped/verified from website and social media sources).\n\n"
+        "STRICT SEPARATION OF CURRENT BUSINESS FACTS VS. HISTORICAL DOCUMENT EVIDENCE:\n"
+        "1. CURRENT BUSINESS INFORMATION (Company Name, Goal, Target Audience, Budget, Current Channels, etc.) represents present-day facts.\n"
+        "2. HISTORICAL DOCUMENT EVIDENCE (from uploaded PDF) represents past campaigns, past budgets, historical results, and past learnings.\n"
+        "3. DO NOT mark current-business requirements (such as current marketing budget, current primary goal, target market location, current channels) as 'known' solely because the historical PDF mentions past figures or past activities. Historical values are NOT current business inputs.\n"
+        "4. DO NOT overwrite or infer present business facts from past PDF numbers. A historical budget or past channel mix is NOT the current budget or current focus.\n"
+        "5. Historical PDF insights CAN inform which questions are useful: if a requirement asks about historical experience (e.g. past campaign performance, past benchmarks) and the PDF already provides it, you may mark that historical requirement as 'known'. But if information is needed for the CURRENT strategy (e.g. current pricing, current target location) and is missing from current inputs, keep it as 'still_relevant'.\n"
+        "6. If the document is marked as not marketing relevant or has no marketing insights, do NOT treat it as marketing evidence.\n\n"
         "CRITICAL RELEVANCE RULE — DO NOT MARK EVERYTHING RELEVANT:\n"
         "For every requirement, ask: 'Would knowing this information materially help create the marketing strategy for THIS specific business?'\n"
         "Do NOT mark every predefined requirement as relevant simply because it is in the library or generally useful for marketing.\n"
         "- If NO: Mark as 'not_relevant' (e.g. subscription_model or recurring sales cycle for a physical footwear store or single-purchase retail business).\n"
-        "- If YES and information is ALREADY available in business context, past marketing document, or online presence: Mark as 'known' and provide a concise summary as 'value'.\n"
+        "- If YES and information is ALREADY available in authoritative current business context or verified online presence: Mark as 'known' and provide a concise summary as 'value'.\n"
         "- If YES but information is missing: Keep as 'still_relevant'.\n\n"
         "IMPORTANT GROUNDEDNESS RULES:\n"
         "1. Only mark a requirement as 'known' or 'not_relevant' based on facts when the context explicitly supports it. Do NOT infer unsupported facts.\n"
@@ -107,7 +122,9 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=system_prompt,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            operation="relevance_analysis",
+            conversation_id=state.thread_id,
         )
 
         data = json.loads(raw_response)

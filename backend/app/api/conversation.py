@@ -8,6 +8,8 @@ from langgraph.types import Command
 
 from backend.app.models.agent_state import MarketingAgentState
 from backend.app.models.business_context import BusinessContext
+from backend.app.models.document_context import HistoricalDocumentContext
+from backend.app.schemas.pdf_extraction import PDFInsights
 from backend.app.core.requirements_library import load_requirements_into_state
 from backend.app.agent.graph import graph
 from backend.app.schemas.conversation import (
@@ -30,6 +32,7 @@ from backend.app.db.session import SessionLocal
 from backend.app.db.orm.strategy_request import StrategyRequest
 from backend.app.db.orm.business import Business
 from backend.app.db.orm.conversation import Conversation
+from backend.app.db.orm.uploaded_document import UploadedDocument
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,8 @@ def start_conversation(request: StartRequest):
 
         # 1. Persist initial StrategyRequest, Business, and Conversation records
         strategy_request_id = None
+        doc_summary = None
+        doc_context = None
         try:
             with SessionLocal() as db:
                 strategy_req = StrategyRequest(
@@ -101,6 +106,45 @@ def start_conversation(request: StartRequest):
                 )
                 db.add(strategy_req)
                 db.flush()
+
+                # Associate uploaded document if provided
+                if request.uploaded_document_id:
+                    uploaded_doc = db.query(UploadedDocument).filter(
+                        UploadedDocument.id == request.uploaded_document_id
+                    ).first()
+                    if not uploaded_doc:
+                        logger.warning(f"Uploaded document ID '{request.uploaded_document_id}' not found.")
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Uploaded document '{request.uploaded_document_id}' not found."
+                        )
+                    if uploaded_doc.strategy_request_id and uploaded_doc.strategy_request_id != strategy_req.id:
+                        logger.warning(
+                            f"Uploaded document '{request.uploaded_document_id}' is already linked to StrategyRequest '{uploaded_doc.strategy_request_id}'."
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="The specified document is already associated with another strategy request."
+                        )
+                    uploaded_doc.strategy_request_id = strategy_req.id
+                    doc_summary = uploaded_doc.executive_summary
+
+                    pdf_insights_obj = None
+                    if uploaded_doc.pdf_insights and isinstance(uploaded_doc.pdf_insights, dict):
+                        try:
+                            pdf_insights_obj = PDFInsights.model_validate(uploaded_doc.pdf_insights)
+                        except Exception as val_err:
+                            logger.warning(f"Could not parse pdf_insights for document {uploaded_doc.id}: {val_err}")
+
+                    doc_context = HistoricalDocumentContext(
+                        filename=uploaded_doc.filename,
+                        is_marketing_relevant=uploaded_doc.is_marketing_relevant,
+                        document_type=uploaded_doc.document_type,
+                        relevance_reason=uploaded_doc.relevance_reason,
+                        executive_summary=uploaded_doc.executive_summary,
+                        pdf_insights=pdf_insights_obj,
+                    )
+                    logger.info(f"Associated UploadedDocument '{uploaded_doc.id}' with StrategyRequest '{strategy_req.id}'.")
 
                 budget_amt = request.budget_resources.amount if request.budget_resources else None
                 budget_curr = request.budget_resources.currency if request.budget_resources else None
@@ -132,6 +176,8 @@ def start_conversation(request: StartRequest):
                 logger.info(
                     f"Persisted StrategyRequest '{strategy_request_id}', Business, and Conversation '{conv_id}' records successfully."
                 )
+        except HTTPException:
+            raise
         except Exception as db_err:
             logger.error(f"Database insertion failed for StrategyRequest/Business/Conversation: {db_err}")
             raise HTTPException(
@@ -140,6 +186,7 @@ def start_conversation(request: StartRequest):
             )
 
         # 2. Build initial context from structured request fields
+        past_doc_val = request.past_marketing_document or doc_summary
         context = BusinessContext(
             company_name=request.company_name,
             product_or_service=request.product_or_service,
@@ -148,7 +195,7 @@ def start_conversation(request: StartRequest):
             budget_resources=request.budget_resources,
             current_marketing_channels=request.current_marketing_channels,
             website_social_links=request.website_social_links,
-            past_marketing_document=request.past_marketing_document
+            past_marketing_document=past_doc_val
         )
 
         # Process online presence if website/social links are provided
@@ -160,7 +207,12 @@ def start_conversation(request: StartRequest):
                 parsed_urls = parse_website_social_links(request.website_social_links)
                 if parsed_urls:
                     scraped_results = asyncio.run(scrape_parsed_urls(parsed_urls))
-                    online_presence_ctx = process_online_presence(scraped_results, context)
+                    online_presence_ctx = process_online_presence(
+                        scraped_results,
+                        context,
+                        strategy_request_id=strategy_request_id,
+                        conversation_id=conv_id,
+                    )
 
                     # Persist online presence sources to database
                     if strategy_request_id:
@@ -180,13 +232,14 @@ def start_conversation(request: StartRequest):
         session_intro_text = determine_session_intro(
             parsed_urls=parsed_urls,
             scraped_results=scraped_results,
-            past_marketing_doc=request.past_marketing_document,
+            past_marketing_doc=past_doc_val,
         )
 
         # 3. Create state and load requirements
         state = MarketingAgentState(
             business_context=context,
             online_presence_context=online_presence_ctx,
+            document_context=doc_context,
             thread_id=thread_id
         )
         load_requirements_into_state(state)

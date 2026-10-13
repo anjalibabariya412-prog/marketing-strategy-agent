@@ -1,3 +1,4 @@
+import uuid
 from typing import Dict, Optional
 from pydantic import BaseModel, Field, field_validator
 
@@ -49,8 +50,11 @@ class StartRequest(BaseModel):
     )
     past_marketing_document: Optional[str] = Field(
         default=None,
-        max_length=2000,
         description="Extracted or summarized text from a previous marketing plan or document uploaded by the user."
+    )
+    uploaded_document_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="UUID of the uploaded document in uploaded_documents table to associate with this strategy request."
     )
 
 

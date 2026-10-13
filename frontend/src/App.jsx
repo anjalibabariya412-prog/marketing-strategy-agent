@@ -250,10 +250,19 @@ const BudgetSectionRenderer = ({ content }) => {
 
   const items = rawItems.map((item) => {
     if (typeof item === 'object' && item !== null) {
+      let pct = item.percentage;
+      if (pct !== null && pct !== undefined && pct !== '') {
+        pct = String(pct).trim();
+        if (!pct.endsWith('%') && !isNaN(Number(pct))) {
+          pct = `${pct}%`;
+        }
+      } else {
+        pct = null;
+      }
       return {
         label: item.label || 'Category',
         amount: item.amount || '',
-        percentage: item.percentage || null,
+        percentage: pct,
         description: item.description || ''
       };
     }
@@ -294,30 +303,120 @@ const ActionPlanRenderer = ({ content }) => {
   const items = toItemArray(content);
   if (items.length === 0) return <SmartSectionRenderer content={content} />;
 
+  // ── Group items by week ─────────────────────────────────────────────────
+  // The LLM produces 4 strings, each starting with "**Week X: Title**".
+  // When the LLM splits tasks into individual strings instead of grouping
+  // them per-week, we detect any item whose first non-whitespace text starts
+  // with a Week header and use it as a group boundary so that step numbering
+  // always restarts within each week.
+  //
+  // Matches: **Week 1:**, Week 2:, ** Week 3: … (case-insensitive).
+  const WEEK_HEADER_RE = /^\*{0,2}\s*Week\s+\d+\s*:/i;
+
+  const groups = []; // Array of { heading: string|null, items: string[] }
+  let currentGroup = null;
+
+  items.forEach((raw) => {
+    const text = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+    if (!text) return;
+
+    if (WEEK_HEADER_RE.test(text)) {
+      // This item IS or STARTS with a week heading.
+      // First line = heading; everything after the first newline = body.
+      const newlineIdx = text.indexOf('\n');
+      const headingLine = newlineIdx !== -1 ? text.slice(0, newlineIdx).trim() : text;
+      const bodyAfterHeading = newlineIdx !== -1 ? text.slice(newlineIdx + 1).trim() : '';
+
+      currentGroup = { heading: headingLine, items: [] };
+      if (bodyAfterHeading) currentGroup.items.push(bodyAfterHeading);
+      groups.push(currentGroup);
+    } else if (currentGroup) {
+      // Continuation item belonging to the current week group.
+      currentGroup.items.push(text);
+    } else {
+      // Ungrouped content before any week heading.
+      currentGroup = { heading: null, items: [text] };
+      groups.push(currentGroup);
+    }
+  });
+
+  // If no Week headers were found at all, render as a single flat group
+  // (preserves original behaviour for non-standard LLM output).
+  const hasWeekHeadings = groups.some((g) => g.heading !== null);
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="action-plan-timeline">
-      {items.map((item, idx) => (
-        <div key={idx} className="timeline-card">
-          <div className="timeline-badge-column">
-            <span className="timeline-num">{idx + 1}</span>
-            {idx < items.length - 1 && <span className="timeline-line" />}
-          </div>
-          <div className="timeline-content-column">
-            <div className="timeline-item">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkBreaks]}
-                components={{
-                  p: ({ node, ...props }) => <span {...props} />,
-                  strong: ({ node, ...props }) => <strong className="md-strong" {...props} />,
-                  em: ({ node, ...props }) => <em className="md-em" {...props} />,
-                }}
-              >
-                {item}
-              </ReactMarkdown>
+      {groups.map((group, gIdx) => {
+        const isLastGroup = gIdx === groups.length - 1;
+        return (
+          <div key={gIdx} className="timeline-week-group">
+            <div className={`timeline-card${group.heading ? ' timeline-week-header-card' : ''}`}>
+              {/* Left column: week badge + connecting line */}
+              <div className="timeline-badge-column">
+                <span className="timeline-week-badge">{gIdx + 1}</span>
+                {!isLastGroup && <span className="timeline-line" />}
+              </div>
+
+              {/* Right column: heading + per-week items */}
+              <div className="timeline-content-column">
+                {group.heading && (
+                  <div className="timeline-week-heading">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm, remarkBreaks]}
+                      components={{
+                        p: ({ node, ...props }) => <span {...props} />,
+                        strong: ({ node, ...props }) => (
+                          <strong className="md-strong" {...props} />
+                        ),
+                      }}
+                    >
+                      {group.heading}
+                    </ReactMarkdown>
+                  </div>
+                )}
+
+                {group.items.length > 0 && (
+                  <div className="timeline-week-items">
+                    {group.items.map((stepText, sIdx) => (
+                      <div key={sIdx} className="timeline-step-row">
+                        {hasWeekHeadings && (
+                          <span className="timeline-step-num">{sIdx + 1}</span>
+                        )}
+                        <div className="timeline-item">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkBreaks]}
+                            components={{
+                              p: ({ node, ...props }) => <span {...props} />,
+                              strong: ({ node, ...props }) => (
+                                <strong className="md-strong" {...props} />
+                              ),
+                              em: ({ node, ...props }) => (
+                                <em className="md-em" {...props} />
+                              ),
+                              ul: ({ node, ...props }) => (
+                                <ul className="md-ul" {...props} />
+                              ),
+                              ol: ({ node, ...props }) => (
+                                <ol className="md-ol" {...props} />
+                              ),
+                              li: ({ node, ...props }) => (
+                                <li className="md-li" {...props} />
+                              ),
+                            }}
+                          >
+                            {stepText}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
@@ -362,6 +461,26 @@ const ValuePropositionRenderer = ({ content }) => {
   );
 };
 
+// Helper: Validate budget amount (accepts positive numbers & decimals, rejects non-numeric/negative/zero)
+const validateBudgetAmount = (val) => {
+  if (val === undefined || val === null) {
+    return 'Please enter a valid budget greater than 0.';
+  }
+  const str = String(val).trim();
+  if (!str) {
+    return 'Please enter a valid budget greater than 0.';
+  }
+  // Allow only valid positive numeric format: digits with optional single decimal point
+  if (!/^\d+(\.\d+)?$/.test(str)) {
+    return 'Please enter a valid budget greater than 0.';
+  }
+  const num = Number(str);
+  if (isNaN(num) || num <= 0) {
+    return 'Please enter a valid budget greater than 0.';
+  }
+  return '';
+};
+
 
 function App() {
   // Form State
@@ -383,6 +502,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileUploading, setFileUploading] = useState(false);
   const [pastMarketingDocText, setPastMarketingDocText] = useState(null);
+  const [uploadedDocumentId, setUploadedDocumentId] = useState(null);
   const [fileUploadError, setFileUploadError] = useState(null);
   const [fileUploadSuccess, setFileUploadSuccess] = useState(false);
 
@@ -489,6 +609,7 @@ function App() {
     setFileUploadError(null);
     setFileUploadSuccess(false);
     setPastMarketingDocText(null);
+    setUploadedDocumentId(null);
 
     if (file.size > 10 * 1024 * 1024) {
       setFileUploadError('File size exceeds the maximum limit of 10 MB.');
@@ -516,6 +637,7 @@ function App() {
 
       const data = await response.json();
       setPastMarketingDocText(data.summary || null);
+      setUploadedDocumentId(data.document_id || null);
       setFileUploadSuccess(true);
     } catch (err) {
       console.error('Failed to extract PDF text:', err);
@@ -528,6 +650,7 @@ function App() {
   const handleRemoveFile = () => {
     setSelectedFile(null);
     setPastMarketingDocText(null);
+    setUploadedDocumentId(null);
     setFileUploadError(null);
     setFileUploadSuccess(false);
     setFileUploading(false);
@@ -594,6 +717,15 @@ function App() {
     }
   };
 
+  const handleBudgetBlur = () => {
+    if (formData.budget_amount !== '') {
+      const error = validateBudgetAmount(formData.budget_amount);
+      if (error) {
+        setFormErrors((prev) => ({ ...prev, budget_amount: error }));
+      }
+    }
+  };
+
   const extractBusinessSummary = (fullQuestionText) => {
     if (!fullQuestionText) return '';
     const parts = fullQuestionText.split('\n\n');
@@ -655,13 +787,9 @@ function App() {
       errors.budget_currency = 'Currency must be INR or USD.';
     }
 
-    if (!formData.budget_amount || !String(formData.budget_amount).trim()) {
-      errors.budget_amount = 'Marketing budget amount is required.';
-    } else {
-      const numAmount = Number(formData.budget_amount);
-      if (isNaN(numAmount) || numAmount <= 0) {
-        errors.budget_amount = 'Marketing budget amount must be greater than 0.';
-      }
+    const budgetError = validateBudgetAmount(formData.budget_amount);
+    if (budgetError) {
+      errors.budget_amount = budgetError;
     }
 
     setFormErrors(errors);
@@ -683,6 +811,7 @@ function App() {
       current_marketing_channels: formData.current_marketing_channels.trim(),
       website_social_links: formData.website_social_links.trim() || null,
       past_marketing_document: pastMarketingDocText || null,
+      uploaded_document_id: uploadedDocumentId || null,
     };
 
     try {
@@ -960,11 +1089,12 @@ function App() {
                     </select>
                     <input
                       id="budget_amount"
-                      type="number"
-                      min="1"
+                      type="text"
+                      inputMode="decimal"
                       className={`form-input budget-amount-input ${formErrors.budget_amount ? 'invalid' : ''}`}
                       value={formData.budget_amount}
                       onChange={(e) => handleInputChange('budget_amount', e.target.value)}
+                      onBlur={handleBudgetBlur}
                       placeholder="e.g. 30000"
                       disabled={formSubmitting}
                     />
@@ -1038,9 +1168,36 @@ function App() {
                       </div>
                     </div>
                   ) : (
-                    <div className="file-upload-status success">
-                      <span className="file-name">{selectedFile.name}</span>
-                      <button type="button" className="btn-remove-file" onClick={handleRemoveFile}>✕</button>
+                    <div className={`file-upload-status ${fileUploading ? 'loading' : fileUploadSuccess ? 'success' : 'error'}`}>
+                      <div className="file-info-group">
+                        {fileUploading && <span className="spinner-sm" />}
+                        {fileUploadSuccess && <span className="success-icon">✓</span>}
+                        <span className="file-name">{selectedFile.name}</span>
+                        {fileUploading && <span className="uploading-text">Uploading...</span>}
+                      </div>
+                      <div className="file-actions-group">
+                        {fileUploadSuccess && (
+                          <button
+                            type="button"
+                            className="btn-view-pdf"
+                            onClick={handleViewPdf}
+                          >
+                            View PDF
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-remove-file"
+                          onClick={handleRemoveFile}
+                          title="Remove file"
+                        >✕</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {fileUploadError && (
+                    <div className="field-footer">
+                      <div className="field-error">{fileUploadError}</div>
                     </div>
                   )}
                 </div>
@@ -1063,8 +1220,6 @@ function App() {
                       </svg>
                       <span>Analyzing your business</span>
                     </span>
-                  ) : fileUploading ? (
-                    'Uploading File...'
                   ) : (
                     'Start →'
                   )}

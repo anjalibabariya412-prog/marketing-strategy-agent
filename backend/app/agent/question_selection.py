@@ -10,6 +10,7 @@ from backend.app.models.information_requirement import (
     create_dynamic_requirement,
     is_duplicate_requirement,
 )
+from backend.app.models.document_context import format_document_context
 from backend.app.models.online_presence import format_online_presence_context
 from backend.app.services.llm_service import get_llm_response, LLMServiceError
 
@@ -17,7 +18,15 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are an expert marketing strategy consultant selecting the next single information requirement to clarify with a client.\n"
-    "Your goal is to evaluate candidate missing requirements against the known business context, past marketing document, online presence context (scraped website/social media), and conversation history.\n\n"
+    "Your goal is to evaluate candidate missing requirements against the known business context, historical document evidence, "
+    "online presence context (scraped website/social media), and conversation history.\n\n"
+    "HISTORICAL EVIDENCE VS. CURRENT BUSINESS INPUTS:\n"
+    "1. Current business information (form inputs and resolved requirements) represents the present-day state.\n"
+    "2. Historical document evidence (from uploaded PDF) represents past campaigns, past budgets, and past learnings.\n"
+    "3. Do NOT confuse past performance or past budgets from the PDF with current business parameters.\n"
+    "4. Do NOT ask redundant questions about past campaigns or historical results if they are already clearly documented in the historical document evidence.\n"
+    "5. Ask questions that clarify the CURRENT strategy, positioning, and execution where current inputs are still missing.\n"
+    "6. If the uploaded document is not marketing relevant, ignore it for strategy question selection.\n\n"
     "REQUIREMENT SELECTION RULES:\n"
     "1. Prefer selecting an existing requirement ID from the provided CANDIDATE MISSING REQUIREMENTS list.\n"
     "2. ONLY if an important strategic information gap exists for this specific business that is NOT covered by any existing requirement, you may propose ONE dynamic requirement using 'create_dynamic'.\n"
@@ -102,8 +111,12 @@ def select_next_requirement(state: MarketingAgentState) -> Optional[InformationR
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
         f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
-        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}",
     ]
+    doc_str = format_document_context(state.document_context)
+    if ctx.past_marketing_document and not doc_str:
+        context_lines.append(f"Past marketing document summary: {ctx.past_marketing_document}")
+    if doc_str:
+        context_lines.append(f"\nHISTORICAL MARKETING EVIDENCE (FROM UPLOADED DOCUMENT):\n{doc_str}")
 
     op_str = format_online_presence_context(state.online_presence_context)
     if op_str:
@@ -149,7 +162,9 @@ def select_next_requirement(state: MarketingAgentState) -> Optional[InformationR
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=SYSTEM_PROMPT,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            operation="question_selection",
+            conversation_id=state.thread_id,
         )
 
         data = json.loads(raw_response)
@@ -232,7 +247,7 @@ QUESTION_GEN_SYSTEM_PROMPT = (
     "     * Services / Consulting: Ask about service pricing or packages (e.g. 'What is the price range for your consulting services?').\n"
     "   - sales_conversion_journey -> Adapt to business type (Ecommerce/Shoes: 'How do customers usually buy your shoes online or in-store?'; Bakery: 'How do customers usually place an order with you?'; SaaS: 'How does a potential customer move from enquiry to purchase?'; Salon: 'How do clients usually book your services?'). Do NOT use generic sales jargon like 'sales cycle' when unnatural.\n"
     "7. CONTEXT PERSONALIZATION: Use the specific business name or product type naturally.\n"
-    "8. AVOID REPETITION: Review previous Q&A history and do NOT repeat previously asked questions.\n"
+    "8. AVOID REPETITION & RESPECT HISTORICAL EVIDENCE: Review previous Q&A history and historical document evidence; do NOT repeat previously asked questions, and do NOT ask for past performance data that is already clearly documented in the historical evidence.\n"
     "9. OUTPUT FORMAT:\n"
     "Return ONLY raw question text. No quotation marks, no markdown, no explanation."
 )
@@ -262,8 +277,12 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
         f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
-        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}",
     ]
+    doc_str = format_document_context(state.document_context)
+    if ctx.past_marketing_document and not doc_str:
+        context_lines.append(f"Past marketing document summary: {ctx.past_marketing_document}")
+    if doc_str:
+        context_lines.append(f"\nHISTORICAL MARKETING EVIDENCE (FROM UPLOADED DOCUMENT):\n{doc_str}")
 
     op_str = format_online_presence_context(state.online_presence_context)
     if op_str:
@@ -310,7 +329,9 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=QUESTION_GEN_SYSTEM_PROMPT,
-            temperature=0.7
+            temperature=0.7,
+            operation="question_generation",
+            conversation_id=state.thread_id,
         )
 
         question = raw_response.strip().strip('"').strip("'").strip()
@@ -373,7 +394,7 @@ FIRST_MESSAGE_SYSTEM_PROMPT = (
     "  * If website analysis is available: You may reference findings from their website/products.\n"
     "  * If NO website is available: DO NOT mention 'website', 'your website', or 'found on your website'. Rely on initial business details, social media, or uploaded documents instead.\n"
     "  * If social media is available (and no website): Reference social findings if explicitly present in extracted data.\n"
-    "  * If a past marketing document/PDF is provided: Use information from it.\n"
+    "  * If historical document evidence / past marketing PDF is provided: Reference historical experience as past context, but strictly distinguish past activities from current goals and current resources.\n"
     "- GROUNDING MANDATE: DO NOT invent facts, competitors, pricing, locations, USP, customer demographics, pain points, product claims, or numbers not explicitly present in context.\n\n"
     "PART 2: CONNECTED TRANSITION & ONE QUESTION\n"
     "- Select ONE missing requirement from the provided CANDIDATE MISSING REQUIREMENTS list that is most strategically valuable based on what is already known vs missing.\n"
@@ -487,8 +508,12 @@ def generate_first_contextual_message(state: MarketingAgentState) -> str:
         f"Target Audience: {ctx.target_audience or 'Not provided'}",
         f"Marketing Budget/Resources: {ctx.budget_resources or 'Not provided'}",
         f"Current Marketing Channels: {ctx.current_marketing_channels or 'Not provided'}",
-        f"Past marketing document summary: {ctx.past_marketing_document or 'Not provided'}",
     ]
+    doc_str = format_document_context(state.document_context)
+    if ctx.past_marketing_document and not doc_str:
+        context_lines.append(f"Past marketing document summary: {ctx.past_marketing_document}")
+    if doc_str:
+        context_lines.append(f"\nHISTORICAL MARKETING EVIDENCE (FROM UPLOADED DOCUMENT):\n{doc_str}")
 
     op_str = format_online_presence_context(state.online_presence_context)
     if op_str:
@@ -527,7 +552,9 @@ def generate_first_contextual_message(state: MarketingAgentState) -> str:
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=FIRST_MESSAGE_SYSTEM_PROMPT,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            operation="first_message_generation",
+            conversation_id=state.thread_id,
         )
 
         data = json.loads(raw_response)

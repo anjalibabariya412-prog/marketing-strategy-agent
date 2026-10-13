@@ -6,6 +6,7 @@ from .information_requirement import InformationRequirement, RequirementStatus
 from .qa_turn import QATurn
 from .marketing_strategy import MarketingStrategy
 from .online_presence import OnlinePresenceContext
+from .document_context import HistoricalDocumentContext
 
 
 class MarketingAgentState(BaseModel):
@@ -61,6 +62,10 @@ class MarketingAgentState(BaseModel):
     online_presence_context: Optional[OnlinePresenceContext] = Field(
         default=None,
         description="Structured summary of the client's online presence extracted from scraped website/social links."
+    )
+    document_context: Optional[HistoricalDocumentContext] = Field(
+        default=None,
+        description="Structured historical insights extracted from an uploaded marketing document."
     )
     final_strategy: Optional[MarketingStrategy] = Field(
         default=None,
