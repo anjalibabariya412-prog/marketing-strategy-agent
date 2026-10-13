@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # Groq LLM settings
     # OpenAI LLM settings
     openai_api_key: str
-    openai_model: str = "gpt-4o-mini"  # default if not set in .env
+    openai_model: str = "gpt-6-luna"  # default if not set in .env
 
     # Maximum clarifying questions limit before forcing strategy generation
     max_questions: int = 4
