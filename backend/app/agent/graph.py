@@ -21,6 +21,8 @@ def analyze_node(state: MarketingAgentState) -> MarketingAgentState:
     Graph Node: Executes relevance gap analysis against missing requirements,
     updating status to NOT_RELEVANT for inapplicable requirements.
     Runs at most once per conversation session (retrying if analyze_relevance returns False).
+    Prepares the first contextual message in this upstream node so that initial question
+    and first_message_generated flag are committed to checkpoint before ask_node interrupts.
     """
     if not state.analysis_done:
         logger.info("Graph Node [analyze]: Running analyze_relevance()")
@@ -29,6 +31,11 @@ def analyze_node(state: MarketingAgentState) -> MarketingAgentState:
             state.analysis_done = True
     else:
         logger.info("Graph Node [analyze]: Skipping analyze_relevance() because analysis_done is True")
+
+    # Prepare first contextual message in completed upstream node if not yet generated and not sufficient
+    if not state.first_message_generated and not is_sufficient(state):
+        logger.info("Graph Node [analyze]: Preparing FIRST contextual agent message")
+        generate_first_contextual_message(state)
 
     return state
 

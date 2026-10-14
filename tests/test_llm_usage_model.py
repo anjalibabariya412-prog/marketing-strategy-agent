@@ -1,7 +1,7 @@
 import uuid
 from decimal import Decimal
 from sqlalchemy import inspect
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 
 from backend.app.db.base import Base
 from backend.app.db.orm.llm_usage import LLMUsage
@@ -15,12 +15,47 @@ def test_llm_usage_model_registration():
 
 
 def test_llm_usage_columns_and_types():
-    """Verify columns, types, and nullability on LLMUsage."""
+    """Verify exact 17 columns, types, and nullability on LLMUsage."""
     table = Base.metadata.tables["llm_usage"]
     cols = table.columns
 
+    # Verify exactly 17 columns exist
+    expected_17_columns = [
+        "id",
+        "strategy_request_id",
+        "conversation_id",
+        "operation",
+        "provider",
+        "model",
+        "input_tokens",
+        "cached_input_tokens",
+        "cache_write_tokens",
+        "output_tokens",
+        "duration_ms",
+        "input_cost",
+        "cached_input_cost",
+        "cache_write_cost",
+        "output_cost",
+        "total_cost",
+        "created_at",
+    ]
+    assert len(cols) == 17, f"Expected 17 columns, got {len(cols)}: {list(cols.keys())}"
+    assert set(cols.keys()) == set(expected_17_columns)
+
+    # Verify 7 removed columns are NOT present
+    removed_columns = [
+        "total_tokens",
+        "status",
+        "error_message",
+        "pricing_input_rate",
+        "pricing_output_rate",
+        "pricing_cached_rate",
+        "pricing_metadata",
+    ]
+    for col in removed_columns:
+        assert col not in cols, f"Removed column '{col}' should not be in llm_usage"
+
     # Primary key
-    assert "id" in cols
     assert cols["id"].primary_key is True
 
     # Foreign keys (nullable)
@@ -32,30 +67,20 @@ def test_llm_usage_columns_and_types():
     assert cols["provider"].nullable is False
     assert cols["model"].nullable is False
 
-    # Token counts
+    # Token counts (all nullable)
     assert cols["input_tokens"].nullable is True
+    assert cols["cached_input_tokens"].nullable is True
+    assert cols["cache_write_tokens"].nullable is True
     assert cols["output_tokens"].nullable is True
-    assert cols["total_tokens"].nullable is True
 
-    # Status & duration
-    assert cols["status"].nullable is False
+    # Duration (nullable)
     assert cols["duration_ms"].nullable is True
-    assert cols["error_message"].nullable is True
 
-    # Pricing & costs
-    assert cols["pricing_input_rate"].nullable is True
-    assert cols["pricing_output_rate"].nullable is True
-    assert cols["pricing_cached_rate"].nullable is True
-    assert cols["pricing_metadata"].nullable is True
-    assert cols["input_cost"].nullable is True
-    assert cols["output_cost"].nullable is True
-    assert cols["total_cost"].nullable is True
-
-    # Precision for monetary values
-    assert cols["input_cost"].type.precision == 12
-    assert cols["input_cost"].type.scale == 6
-    assert cols["total_cost"].type.precision == 12
-    assert cols["total_cost"].type.scale == 6
+    # Monetary values (Numeric(12, 6), all nullable)
+    for cost_col in ["input_cost", "cached_input_cost", "cache_write_cost", "output_cost", "total_cost"]:
+        assert cols[cost_col].nullable is True
+        assert cols[cost_col].type.precision == 12
+        assert cols[cost_col].type.scale == 6
 
     # Timestamps
     assert cols["created_at"].nullable is False
@@ -73,7 +98,7 @@ def test_llm_usage_indexes():
 
 
 def test_llm_usage_instance_creation():
-    """Verify model instance can be instantiated with required & optional fields."""
+    """Verify model instance can be instantiated with 17-column schema."""
     usage_id = uuid.uuid4()
     req_id = uuid.uuid4()
     conv_id = uuid.uuid4()
@@ -86,17 +111,15 @@ def test_llm_usage_instance_creation():
         provider="openai",
         model="gpt-4o-mini",
         input_tokens=100,
+        cached_input_tokens=40,
+        cache_write_tokens=10,
         output_tokens=25,
-        total_tokens=125,
         duration_ms=450,
-        pricing_input_rate=Decimal("0.150000"),
-        pricing_output_rate=Decimal("0.600000"),
-        pricing_cached_rate=Decimal("0.075000"),
-        pricing_metadata={"cache_read_input_tokens": 0},
         input_cost=Decimal("0.000015"),
+        cached_input_cost=Decimal("0.000005"),
+        cache_write_cost=Decimal("0.000001"),
         output_cost=Decimal("0.000015"),
-        total_cost=Decimal("0.000030"),
-        status="success",
+        total_cost=Decimal("0.000036"),
     )
 
     assert record.id == usage_id
@@ -106,7 +129,13 @@ def test_llm_usage_instance_creation():
     assert record.provider == "openai"
     assert record.model == "gpt-4o-mini"
     assert record.input_tokens == 100
+    assert record.cached_input_tokens == 40
+    assert record.cache_write_tokens == 10
     assert record.output_tokens == 25
-    assert record.total_tokens == 125
-    assert record.total_cost == Decimal("0.000030")
+    assert record.duration_ms == 450
+    assert record.input_cost == Decimal("0.000015")
+    assert record.cached_input_cost == Decimal("0.000005")
+    assert record.cache_write_cost == Decimal("0.000001")
+    assert record.output_cost == Decimal("0.000015")
+    assert record.total_cost == Decimal("0.000036")
     assert "gpt-4o-mini" in repr(record)

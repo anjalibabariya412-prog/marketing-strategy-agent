@@ -9,8 +9,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.base import Base
@@ -25,7 +25,7 @@ class LLMUsage(Base):
     ORM model for the llm_usage table.
 
     Records individual LLM invocation details including provider, model name,
-    operation, token counts, pricing metadata, estimated costs, and execution duration.
+    operation, token counts (input, cached input, cache write, output), costs, and execution duration.
     """
 
     __tablename__ = "llm_usage"
@@ -91,71 +91,52 @@ class LLMUsage(Base):
         comment="Number of prompt/input tokens.",
     )
 
+    cached_input_tokens: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Number of cached input tokens reported by the API.",
+    )
+
+    cache_write_tokens: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Number of cache-write prompt tokens reported by the API.",
+    )
+
     output_tokens: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True,
         comment="Number of completion/output tokens.",
     )
 
-    total_tokens: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        nullable=True,
-        comment="Total tokens consumed.",
-    )
-
     # ---------------------------------------------------------------------------
-    # Execution Status & Duration
+    # Duration
     # ---------------------------------------------------------------------------
-    status: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        default="success",
-        comment="Execution status. Expected: success, failed.",
-    )
-
     duration_ms: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True,
         comment="Call execution duration in milliseconds.",
     )
 
-    error_message: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        comment="Error message if the LLM call failed.",
-    )
-
     # ---------------------------------------------------------------------------
-    # Pricing Metadata & Calculated Costs (Precise numeric monetary values)
+    # Calculated Costs (Precise numeric monetary values)
     # ---------------------------------------------------------------------------
-    pricing_input_rate: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(precision=12, scale=6),
-        nullable=True,
-        comment="Price per 1M input tokens in USD.",
-    )
-
-    pricing_output_rate: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(precision=12, scale=6),
-        nullable=True,
-        comment="Price per 1M output tokens in USD.",
-    )
-
-    pricing_cached_rate: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(precision=12, scale=6),
-        nullable=True,
-        comment="Price per 1M cached tokens in USD.",
-    )
-
-    pricing_metadata: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
-        nullable=True,
-        comment="Raw token pricing rate metadata snapshot.",
-    )
-
     input_cost: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(precision=12, scale=6),
         nullable=True,
         comment="Calculated input cost in USD.",
+    )
+
+    cached_input_cost: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(precision=12, scale=6),
+        nullable=True,
+        comment="Calculated cached-input cost in USD.",
+    )
+
+    cache_write_cost: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(precision=12, scale=6),
+        nullable=True,
+        comment="Calculated cache-write cost in USD.",
     )
 
     output_cost: Mapped[Optional[Decimal]] = mapped_column(
@@ -196,5 +177,6 @@ class LLMUsage(Base):
     def __repr__(self) -> str:
         return (
             f"<LLMUsage id={self.id!s} provider={self.provider!r} model={self.model!r} "
-            f"op={self.operation!r} status={self.status!r}>"
+            f"op={self.operation!r}>"
         )
+

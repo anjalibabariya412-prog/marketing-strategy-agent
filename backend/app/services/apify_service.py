@@ -41,10 +41,10 @@ ACTOR_MAPPING: Dict[str, Dict[str, Any]] = {
         },
     },
     "linkedin": {
-        "actor_id": "apify/linkedin-post-scraper",
+        "actor_id": "automation-lab/linkedin-company-posts-scraper",
         "build_input": lambda url: {
-            "urls": [url],
-            "deepScrape": False,
+            "companyUrls": [url],
+            "maxPostsPerCompany": 5,
         },
     },
 }

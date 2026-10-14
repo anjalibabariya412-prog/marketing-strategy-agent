@@ -70,7 +70,7 @@ REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
         description=(
             "Understand how a potential customer moves from discovering the business to becoming a customer."
         ),
-        is_must_have=True,
+        is_must_have=False,
         status=RequirementStatus.UNKNOWN,
         value=None,
         is_custom=False,

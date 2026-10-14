@@ -35,22 +35,9 @@ const getReportDescription = (goal) => {
 
 // SVG Icon Helpers to ensure no raw SVG text appears
 const Icons = {
-  Copy: () => (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  ),
   Check: () => (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12" />
-    </svg>
-  ),
-  Download: () => (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   ),
   Overview: () => (
@@ -112,13 +99,6 @@ const Icons = {
       <line x1="3" y1="10" x2="21" y2="10" />
     </svg>
   ),
-  Additional: () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="16" />
-      <line x1="8" y1="12" x2="16" y2="12" />
-    </svg>
-  ),
   Sparkles: () => (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
@@ -153,13 +133,6 @@ const SectionIconMap = {
   action_plan: Icons.ActionPlan,
 };
 
-// Helper: Clean text content (used for copy-to-clipboard)
-const cleanTextContent = (items) => {
-  if (!items) return '';
-  if (Array.isArray(items)) return items.filter(Boolean).join('\n');
-  if (typeof items === 'string') return items.trim();
-  return '';
-};
 
 // Helper: Normalize a field value to an array of strings or objects
 const toItemArray = (val) => {
@@ -322,10 +295,26 @@ const ActionPlanRenderer = ({ content }) => {
 
     if (WEEK_HEADER_RE.test(text)) {
       // This item IS or STARTS with a week heading.
-      // First line = heading; everything after the first newline = body.
+      // 1. If newline is present, split at the first newline.
+      // 2. If no newline exists, detect the closing `**` of the initial bold Week heading.
       const newlineIdx = text.indexOf('\n');
-      const headingLine = newlineIdx !== -1 ? text.slice(0, newlineIdx).trim() : text;
-      const bodyAfterHeading = newlineIdx !== -1 ? text.slice(newlineIdx + 1).trim() : '';
+      let headingLine = '';
+      let bodyAfterHeading = '';
+
+      if (newlineIdx !== -1) {
+        headingLine = text.slice(0, newlineIdx).trim();
+        bodyAfterHeading = text.slice(newlineIdx + 1).trim();
+      } else if (text.startsWith('**')) {
+        const boldEndIdx = text.indexOf('**', 2);
+        if (boldEndIdx !== -1) {
+          headingLine = text.slice(0, boldEndIdx + 2).trim();
+          bodyAfterHeading = text.slice(boldEndIdx + 2).trim();
+        } else {
+          headingLine = text;
+        }
+      } else {
+        headingLine = text;
+      }
 
       currentGroup = { heading: headingLine, items: [] };
       if (bodyAfterHeading) currentGroup.items.push(bodyAfterHeading);
@@ -339,10 +328,6 @@ const ActionPlanRenderer = ({ content }) => {
       groups.push(currentGroup);
     }
   });
-
-  // If no Week headers were found at all, render as a single flat group
-  // (preserves original behaviour for non-standard LLM output).
-  const hasWeekHeadings = groups.some((g) => g.heading !== null);
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -380,9 +365,6 @@ const ActionPlanRenderer = ({ content }) => {
                   <div className="timeline-week-items">
                     {group.items.map((stepText, sIdx) => (
                       <div key={sIdx} className="timeline-step-row">
-                        {hasWeekHeadings && (
-                          <span className="timeline-step-num">{sIdx + 1}</span>
-                        )}
                         <div className="timeline-item">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkBreaks]}
@@ -417,6 +399,81 @@ const ActionPlanRenderer = ({ content }) => {
           </div>
         );
       })}
+    </div>
+  );
+};
+
+
+// Component: Specialized Renderer for Marketing Channels & Tactics
+const MarketingChannelsRenderer = ({ content }) => {
+  const items = toItemArray(content);
+
+  if (items.length === 0) {
+    return <p className="section-text-empty">No channels or tactics specified.</p>;
+  }
+
+  const result = [];
+  let currentChannel = null;
+
+  items.forEach((raw) => {
+    const text = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+    if (!text) return;
+
+    // Major section headers (#### or ###)
+    if (/^#{3,4}\s/.test(text)) {
+      currentChannel = null;
+      result.push(text);
+      return;
+    }
+
+    // Bold channel item (e.g. **LinkedIn** Tactic, **LinkedIn**: Tactic, **LinkedIn:** Tactic)
+    const match = text.match(/^\*{2}([^*]+?)\*{2}[:\s–—\-]*(.*)$/s);
+    if (match) {
+      const channel = match[1].replace(/[:\-–—]+$/, '').trim();
+      const tactic = match[2].trim();
+
+      if (currentChannel !== channel) {
+        currentChannel = channel;
+        result.push(`##### ${channel}`);
+      }
+
+      if (tactic) {
+        const bulletTactic = tactic.startsWith('- ') || tactic.startsWith('* ') ? tactic : `- ${tactic}`;
+        result.push(bulletTactic);
+      }
+    } else {
+      // Continuation tactic or unchannelled item
+      if (currentChannel) {
+        const bulletText = text.startsWith('- ') || text.startsWith('* ') ? text : `- ${text}`;
+        result.push(bulletText);
+      } else {
+        result.push(text);
+      }
+    }
+  });
+
+  const markdownText = result.join('\n\n');
+
+  return (
+    <div className="report-markdown-body">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        components={{
+          p: ({ node, ...props }) => <p className="md-p" {...props} />,
+          h3: ({ node, ...props }) => <h3 className="md-h3" {...props} />,
+          h4: ({ node, ...props }) => <h4 className="md-h4" {...props} />,
+          h5: ({ node, ...props }) => <h5 className="md-h5" {...props} />,
+          ul: ({ node, ...props }) => <ul className="md-ul" {...props} />,
+          ol: ({ node, ...props }) => <ol className="md-ol" {...props} />,
+          li: ({ node, ...props }) => <li className="md-li" {...props} />,
+          strong: ({ node, ...props }) => <strong className="md-strong" {...props} />,
+          em: ({ node, ...props }) => <em className="md-em" {...props} />,
+          blockquote: ({ node, ...props }) => <blockquote className="md-blockquote" {...props} />,
+          a: ({ node, ...props }) => <a className="md-link" target="_blank" rel="noopener noreferrer" {...props} />,
+        }}
+      >
+        {markdownText}
+      </ReactMarkdown>
     </div>
   );
 };
@@ -529,71 +586,23 @@ function App() {
   const [strategy, setStrategy] = useState(null);
   const [loadingStrategy, setLoadingStrategy] = useState(false);
   const [strategyError, setStrategyError] = useState(null);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopyStrategy = () => {
-    if (!strategy) return;
-
-    let fullText = `MARKETING STRATEGY REPORT\n\n`;
-    STANDARD_SECTIONS.forEach(({ key, label }) => {
-      const val = strategy[key];
-      const items = toItemArray(val);
-      if (items.length > 0) {
-        fullText += `=== ${label.toUpperCase()} ===\n${items.join('\n')}\n\n`;
-      }
-    });
-
-    if (strategy.additional_sections && typeof strategy.additional_sections === 'object') {
-      Object.entries(strategy.additional_sections).forEach(([title, val]) => {
-        const items = toItemArray(val);
-        if (items.length > 0) {
-          fullText += `=== ${title.toUpperCase()} ===\n${items.join('\n')}\n\n`;
-        }
-      });
-    }
-
-    navigator.clipboard.writeText(fullText.trim());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
 
-  const handleDownloadPdf = () => {
-    window.print();
-  };
 
-  // Collect active report sections cleanly from strategy object
+  // Collect active report sections cleanly from strategy object — always preserves all 9 fixed sections in order
   const activeReportSections = [];
   if (strategy) {
     STANDARD_SECTIONS.forEach(({ key, label, category }) => {
       const val = strategy[key];
       const items = toItemArray(val);
-      if (items.length > 0) {
-        activeReportSections.push({
-          key,
-          label,
-          category,
-          content: items,
-          IconComponent: SectionIconMap[key] || Icons.Additional,
-        });
-      }
-    });
-
-    // Dynamically add ALL returned additional sections
-    if (strategy.additional_sections && typeof strategy.additional_sections === 'object') {
-      Object.entries(strategy.additional_sections).forEach(([title, val]) => {
-        const items = toItemArray(val);
-        if (items.length > 0) {
-          activeReportSections.push({
-            key: `add_${title}`,
-            label: title,
-            category: 'Additional',
-            content: items,
-            IconComponent: Icons.Additional,
-          });
-        }
+      activeReportSections.push({
+        key,
+        label,
+        category,
+        content: items,
+        IconComponent: SectionIconMap[key] || Icons.Overview,
       });
-    }
+    });
   }
 
   const answerTextareaRef = useRef(null);
@@ -954,6 +963,9 @@ function App() {
     }
     if (secKey === 'value_proposition') {
       return <ValuePropositionRenderer content={content} />;
+    }
+    if (secKey === 'marketing_channels_and_tactics') {
+      return <MarketingChannelsRenderer content={content} />;
     }
     return <SmartSectionRenderer content={content} />;
   };
@@ -1445,15 +1457,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Report Bottom Actions */}
-              <div className="report-bottom-actions">
-                <button type="button" className="btn-action-pill" onClick={handleCopyStrategy}>
-                  {copied ? <><Icons.Check /> Copied!</> : <><Icons.Copy /> Copy Strategy</>}
-                </button>
-                <button type="button" className="btn-action-pill btn-pdf" onClick={handleDownloadPdf}>
-                  <Icons.Download /> Download PDF
-                </button>
-              </div>
             </div>
           ) : null}
         </div>

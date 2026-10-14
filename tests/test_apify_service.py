@@ -101,7 +101,7 @@ def test_apify_service():
             print("✓ Test 3 Passed: Facebook URL routed to 'apify/facebook-posts-scraper'")
 
         # -------------------------------------------------------------
-        # Test 4: LinkedIn URL -> Actor: apify/linkedin-post-scraper
+        # Test 4: LinkedIn URL -> Actor: automation-lab/linkedin-company-posts-scraper
         # -------------------------------------------------------------
         with patch("backend.app.services.apify_service.ApifyClientAsync") as mock_client_cls:
             mock_client_instance = MagicMock()
@@ -117,11 +117,11 @@ def test_apify_service():
 
             res = run_async(scrape_single_parsed_url(linkedin_url))
 
-            mock_client_instance.actor.assert_called_with("apify/linkedin-post-scraper")
-            mock_actor.call.assert_called_with(run_input={"urls": ["https://linkedin.com/company/brand"], "deepScrape": False})
+            mock_client_instance.actor.assert_called_with("automation-lab/linkedin-company-posts-scraper")
+            mock_actor.call.assert_called_with(run_input={"companyUrls": ["https://linkedin.com/company/brand"], "maxPostsPerCompany": 5})
             assert res.success is True
             assert res.platform == "linkedin"
-            print("✓ Test 4 Passed: LinkedIn URL routed to 'apify/linkedin-post-scraper'")
+            print("✓ Test 4 Passed: LinkedIn URL routed to 'automation-lab/linkedin-company-posts-scraper'")
 
         # -------------------------------------------------------------
         # Test 5: Invalid URL is skipped without invoking Apify client

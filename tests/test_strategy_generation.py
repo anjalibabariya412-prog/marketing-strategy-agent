@@ -38,8 +38,7 @@ def test_strategy_generation_without_user_competitors():
             customer_acquisition_approach="On-campus informational sessions and social media sign-up drives.",
             budget_considerations="$1,500 allocated across campus flyers ($300) and Instagram ads ($1,200).",
             kpis="Recruit 500 captains at $3 cost per captain.",
-            action_plan="Week 1: Launch campus posters. Week 2: Run Instagram ad campaign.",
-            additional_sections={"Assumptions to Verify": "Assuming $3 CPA on Instagram ads."}
+            action_plan="Week 1: Launch campus posters. Week 2: Run Instagram ad campaign."
         )
         return mock_strategy.model_dump_json()
 
@@ -76,8 +75,7 @@ def test_strategy_generation_with_user_provided_competitors():
             customer_acquisition_approach="Free trial lunch boxes distributed at IT hub offices.",
             budget_considerations="₹50,000 allocated for flyer distribution (₹10,000) and trial boxes (₹40,000).",
             kpis="Acquire 100 subscribers at ₹500 CPA.",
-            action_plan="Week 1: Office flyer distribution. Week 2: Trial lunch box delivery.",
-            additional_sections={"Assumptions to Verify": "Assuming ₹500 CPA based on trial box conversion rate."}
+            action_plan="Week 1: Office flyer distribution. Week 2: Trial lunch box delivery."
         )
         return mock_strategy.model_dump_json()
 

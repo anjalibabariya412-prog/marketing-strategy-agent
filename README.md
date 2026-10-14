@@ -122,15 +122,14 @@ answer must be processed (`process_answer_for_requirement`) **before**
 picking the next question, otherwise the same question gets re-asked
 (this was a real bug caught during Phase 8 testing — see Section 9).
 
-### 3.7 Strategy sections are optional, not fixed-mandatory
-`MarketingStrategy` (9 defined sections + `additional_sections`) uses
-`Optional[str] = None` for every section. If a section is genuinely not
-relevant to a business (e.g. "Competitive Positioning" for an
-organization with no real competitors), the LLM is instructed to leave
-it `None` rather than writing generic filler content. Sections that are
-`None` should be hidden/skipped entirely when the strategy is displayed
-to the user (frontend concern — the user should only ever see a clean,
-complete-looking document, never an empty or "N/A" section).
+### 3.7 Fixed 9-section strategy structure
+`MarketingStrategy` always generates exactly 9 standardized marketing strategy
+sections in a fixed order (Business Overview, Target Audience & Insights,
+Competitive Positioning, Value Proposition & Positioning, Marketing Channels &
+Tactics, Customer Acquisition Approach, Budget Considerations & Allocation,
+KPIs & Success Metrics, Action Plan & Timeline). The section structure is fixed
+and consistent across every business, while all content inside each section is
+tailored to the specific business context.
 
 ---
 
@@ -225,8 +224,8 @@ marketing_strategy_agent/
 │       │   ├── qa_turn.py               (QATurn — one Q&A exchange)
 │       │   ├── agent_state.py           (MarketingAgentState — central state,
 │       │   │                              includes final_strategy field)
-│       │   └── marketing_strategy.py    (MarketingStrategy — 9 optional
-│       │                                  sections + additional_sections)
+│       │   └── marketing_strategy.py    (MarketingStrategy — 9 fixed
+│       │                                  standard sections)
 │       └── services/
 │           └── llm_service.py           (get_llm_response, LLMServiceError)
 │

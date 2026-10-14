@@ -176,9 +176,10 @@ SYSTEM_PROMPT = (
     "- Do not invent historical performance or guarantee a particular percentage increase in sales, engagement, conversions, or revenue. If measurable targets are included, distinguish proposed targets from guaranteed outcomes.\n"
     "- Prefer a focused, achievable plan over an unnecessarily large list of activities.\n\n"
 
-    "16. ASSUMPTIONS. "
-    "If assumptions or estimated numbers are necessary, include them in 'Assumptions to Verify'. "
-    "Do not add unnecessary or generic additional sections. Add specialized sections only when they provide real value.\n\n"
+    "16. ASSUMPTIONS & PLANNING ESTIMATES. "
+    "If assumptions or estimated numbers are necessary, integrate them directly into their relevant standard section "
+    "(such as 'target_audience_insights', 'budget_considerations', 'kpis', or 'action_plan'). "
+    "Do NOT create or return any custom or additional sections. All strategic insights must be placed strictly within the 9 fixed sections.\n\n"
 
     "17. FINAL QUALITY CHECK. "
     "Before responding, verify that all business facts, competitor facts, locations, pricing, budget, "
@@ -198,25 +199,22 @@ SYSTEM_PROMPT = (
     "Aim for 3-8 items per field depending on the depth needed.\n\n"
 
     "REQUIRED JSON STRUCTURE:\n"
+    "All 9 sections below are mandatory and must be populated with business-tailored recommendations. Do not omit any section.\n"
     "{\n"
-    '  "business_overview": ["string", ...] or null,\n'
-    '  "target_audience_insights": ["string", ...] or null,\n'
-    '  "competitive_positioning": ["string", ...] or null,\n'
-    '  "value_proposition": ["string", ...] or null,\n'
-    '  "marketing_channels_and_tactics": ["string", ...] or null,\n'
-    '  "customer_acquisition_approach": ["string", ...] or null,\n'
+    '  "business_overview": ["string", ...],\n'
+    '  "target_audience_insights": ["string", ...],\n'
+    '  "competitive_positioning": ["string", ...],\n'
+    '  "value_proposition": ["string", ...],\n'
+    '  "marketing_channels_and_tactics": ["string", ...],\n'
+    '  "customer_acquisition_approach": ["string", ...],\n'
     '  "budget_considerations": [\n'
     '    {"label": "string", "amount": "string", "percentage": "string or null", "description": "string"}\n'
-    '  ] or null,\n'
+    '  ],\n'
     '  "kpis": [\n'
     '    {"metric": "string", "target": "string", "description": "string"}\n'
-    '  ] or null,\n'
-    '  "action_plan": ["string", ...] or null,\n'
-    '  "additional_sections": {"Assumptions to Verify": ["string", ...], "Section Title": ["string", ...]} or null\n'
+    '  ],\n'
+    '  "action_plan": ["string", ...]\n'
     "}\n\n"
-
-    "Every value inside additional_sections MUST be a plain array of strings. "
-    "Do not use nested objects or nested arrays as values."
 
     "18. MISSING OR UNKNOWN INFORMATION. "
     "If the user says 'I don't know', 'not sure', 'unknown', or provides no information for a requirement, "
@@ -677,6 +675,17 @@ def generate_strategy(state: MarketingAgentState) -> MarketingStrategy:
         "- Ground the timeline in the available budget and realistic 1-month capabilities without assuming nonexistent infrastructure."
     )
 
+    tml_req = state.get_requirement_by_id("target_market_location")
+    tml_known = bool(tml_req and tml_req.status == RequirementStatus.KNOWN and tml_req.value)
+    if not tml_known:
+        prompt_parts.append(
+            "\nMANDATORY TARGET MARKET LOCATION UNRESOLVED DIRECTIVE:\n"
+            "- Target market location was NOT provided or confirmed during discovery.\n"
+            "- CRITICAL RULE: DO NOT fabricate, invent, or assume a specific target city, state, or region.\n"
+            "- In 'target_audience_insights', you MUST explicitly document that the target geographic market is unconfirmed and must be specified before launching location-dependent campaigns or ad spend.\n"
+            "- Formulate audience targeting and channel tactics as location-adaptive recommendations."
+        )
+
     prompt_parts.append(
         "\nSynthesize all available context above into a high-quality, tailored marketing strategy JSON object."
     )
@@ -695,6 +704,12 @@ def generate_strategy(state: MarketingAgentState) -> MarketingStrategy:
         data = json.loads(raw_response)
         strategy = MarketingStrategy.model_validate(data)
         strategy = normalize_budget_considerations(strategy, state.business_context.budget_resources)
+        if not tml_known:
+            loc_warning = "Target market location was not specified during discovery; confirm exact geographic targeting (cities, regions, or Pan-India) before launching paid campaigns."
+            if strategy.target_audience_insights is None:
+                strategy.target_audience_insights = []
+            if not any("geographic" in a.lower() or "location" in a.lower() for a in strategy.target_audience_insights):
+                strategy.target_audience_insights.append(loc_warning)
         logger.info("Successfully generated, normalized, and validated MarketingStrategy.")
         return strategy
 

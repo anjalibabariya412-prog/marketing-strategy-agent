@@ -32,7 +32,7 @@ SYSTEM_PROMPT = (
     "2. ONLY if an important strategic information gap exists for this specific business that is NOT covered by any existing requirement, you may propose ONE dynamic requirement using 'create_dynamic'.\n"
     "3. Priority requirements (target_market_location, customer_needs_buying_behavior, competitive_landscape, usp_differentiation, pricing_offer_structure, sales_conversion_journey) should be evaluated systematically.\n"
     "4. GROUNDEDNESS & RELEVANCE RULES:\n"
-    "   - target_market_location: Do NOT infer the target market location from a business address, phone number, website domain, or Instagram bio location. Select 'target_market_location' unless the intended marketing target region/geography is explicitly stated in context.\n"
+    "   - target_market_location: Do NOT infer the target market location from a business address, phone number, website domain, or Instagram bio location. A demographic audience description like 'Indian consumers aged 18–35' does NOT identify intended geographic targeting. Select 'target_market_location' unless specific target geographic markets (e.g. cities, states, regions, Tier-1/Tier-2/Tier-3 cities, or Pan-India) are explicitly stated in context.\n"
     "   - customer_needs_buying_behavior: Focus on what customers look for, value, prefer, or consider. Do NOT assume every business has customer 'pain points' (e.g. for bakeries/retail/salons, ask what customers look for or value; for SaaS/B2B, problems/challenges can be relevant).\n"
     "   - competitive_landscape: Understand direct/indirect competitors and alternative solutions. If competitors are already mentioned in context, do NOT ask for competitor names again; ask how customers compare or what alternatives they consider. If the user explicitly states there are no direct competitors, do not repeatedly ask for direct competitors.\n"
     "   - usp_differentiation: Adapt wording to the specific business/offering type (shoes: footwear collections; bakery: cakes/desserts; SaaS: software features; salon: services; skincare: products).\n"
@@ -234,7 +234,7 @@ QUESTION_GEN_SYSTEM_PROMPT = (
     "4. SIMPLE EVERYDAY ENGLISH: Use simple everyday English. Avoid complicated vocabulary and unnecessary marketing jargon (e.g. 'leveraging', 'positioned', 'sales cycle', 'value prop').\n"
     "5. NO FORMAL PREAMBLES: NEVER start questions with formal phrases such as 'Could you please tell me...', 'Can you elaborate on...', 'I would like to understand...'. Start directly with 'What...', 'Who...', 'Which...', 'How...'.\n"
     "6. REQUIREMENT-SPECIFIC ADAPTATION:\n"
-    "   - target_market_location -> Adapt to business/product type (e.g. 'Which cities or regions do you want to target with your [products/services]?').\n"
+    "   - target_market_location -> Ask which geographic market the business wants to target for this campaign. The client can specify particular cities, states, regions, Tier-1/Tier-2/Tier-3 cities, or Pan-India (e.g. 'Which geographic market do you want to target for this campaign?' or 'Which cities, states, or regions do you want to target for this campaign?').\n"
     "   - customer_needs_buying_behavior -> Adapt to business type (Bakery: 'What do customers look for when choosing a cake for a celebration?'; Shoes: 'What matters most to customers when choosing your shoes?'; SaaS: 'What motivates businesses to look for a solution like yours?'; Salon: 'What do clients consider most when choosing your salon?').\n"
     "   - competitive_landscape -> Adapt to business type (e.g. 'Who are your main competitors or alternatives customers consider?' or if competitors are known, 'What do customers choose your [product/service] for instead of those options?').\n"
     "   - usp_differentiation -> Adapt to business type (Shoes: 'What makes your shoe collections different from other footwear brands?'; Bakery: 'What makes your cakes and desserts different from other bakeries?'; SaaS: 'What makes your software different from competing solutions?').\n"
@@ -253,7 +253,7 @@ QUESTION_GEN_SYSTEM_PROMPT = (
 )
 
 FALLBACK_QUESTIONS = {
-    "target_market_location": "Which location(s) do you want to target?",
+    "target_market_location": "Which geographic market do you want to target for this campaign?",
     "customer_needs_buying_behavior": "What do your customers look for when choosing your offering?",
     "competitive_landscape": "Who are your main competitors or alternative options customers consider?",
     "usp_differentiation": "What makes your offering different from other options?",
@@ -456,7 +456,7 @@ def _build_first_message_fallback(state: MarketingAgentState, selected_req: Info
         ),
         "target_market_location": (
             "Given what I've seen so far,",
-            "which geographic locations or regions do you want to target?"
+            "which geographic market do you want to target for this campaign?"
         ),
         "pricing_offer_structure": (
             "With that in mind,",

@@ -20,17 +20,19 @@ def test_marketing_strategy_model():
         "budget_considerations",
         "kpis",
         "action_plan",
-        "additional_sections",
     ]
     for f in fields:
         assert getattr(strategy_default, f) is None
 
+    assert not hasattr(strategy_default, "additional_sections")
+
+    # Verify backward compatibility: extra fields like additional_sections are ignored without error
     strategy_populated = MarketingStrategy(
         business_overview="CleanSeas Ocean Cleanup non-profit",
         additional_sections={"Volunteer Strategy": "Gamified volunteer rewards"}
     )
     assert strategy_populated.business_overview == ["CleanSeas Ocean Cleanup non-profit"]
-    assert strategy_populated.additional_sections["Volunteer Strategy"] == ["Gamified volunteer rewards"]
+    assert not hasattr(strategy_populated, "additional_sections")
 
     print("=== MarketingStrategy Model Tests Passed Successfully! ===")
 

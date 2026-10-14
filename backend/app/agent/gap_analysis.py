@@ -83,7 +83,11 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
         "- If YES but information is missing: Keep as 'still_relevant'.\n\n"
         "IMPORTANT GROUNDEDNESS RULES:\n"
         "1. Only mark a requirement as 'known' or 'not_relevant' based on facts when the context explicitly supports it. Do NOT infer unsupported facts.\n"
-        "2. TARGET MARKET LOCATION RULE: Do NOT infer the target market location merely from a business address, phone number, Instagram bio location, website domain, or city mentioned in a post. Target market location must be explicitly stated.\n\n"
+        "2. TARGET MARKET LOCATION MANDATORY RULE:\n"
+        "   - target_market_location is a mandatory requirement. It MUST NEVER be marked as 'not_relevant' or 'unavailable'.\n"
+        "   - A demographic target audience such as 'Indian consumers aged 18–35' or 'young adults in India' does NOT identify the intended campaign geographic targeting. Do NOT mark target_market_location as 'known' based on broad demographic nationality or age.\n"
+        "   - Do NOT infer specific cities, states, or regions from a business address, office address, phone number, website domain, or social media profile unless the available information explicitly establishes the intended campaign target market.\n"
+        "   - ONLY mark target_market_location as 'known' if the user explicitly provided a sufficiently specific target geographic market (e.g., particular cities, states, regions, Tier-1/Tier-2/Tier-3 cities, or Pan-India). If provided, preserve that exact geographic target as 'value'. If not explicitly provided, keep it as 'still_relevant'.\n\n"
         "DYNAMIC REQUIREMENT CREATION RULE:\n"
         "After evaluating existing requirements, perform a second check:\n"
         "'Is there an important piece of information needed for this specific business's marketing strategy that NONE of the existing requirements represents?'\n"
@@ -140,9 +144,26 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
                     target_req = state.get_requirement_by_id(req_id)
                     if target_req:
                         if relevance == "not_relevant":
+                            if req_id == "target_market_location" or target_req.is_must_have:
+                                logger.warning(f"Requirement [{req_id}] is a mandatory must-have; cannot be marked NOT_RELEVANT.")
+                                continue
                             target_req.status = RequirementStatus.NOT_RELEVANT
                             logger.info(f"Requirement [{req_id}] marked NOT_RELEVANT by gap analysis.")
                         elif relevance == "known":
+                            if req_id == "target_market_location":
+                                val_str = str(val or "").strip()
+                                demographic_patterns = [
+                                    r"^indian\s+consumers?(?:\s+aged?\s+\d+[\s–-]+\d+)?$",
+                                    r"^indian\s+(?:users?|customers?|audience|people)(?:\s+aged?\s+\d+[\s–-]+\d+)?$",
+                                    r"^consumers?\s+aged?\s+\d+[\s–-]+\d+$",
+                                ]
+                                is_demographic_only = any(re.match(p, val_str, re.IGNORECASE) for p in demographic_patterns)
+                                if is_demographic_only or not val_str:
+                                    logger.info(
+                                        "target_market_location was marked known with demographic-only value '%s'; keeping UNKNOWN.",
+                                        val_str
+                                    )
+                                    continue
                             target_req.status = RequirementStatus.KNOWN
                             if val:
                                 target_req.value = str(val).strip()

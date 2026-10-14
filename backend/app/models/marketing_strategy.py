@@ -1,5 +1,5 @@
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import Any, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class BudgetItem(BaseModel):
@@ -61,9 +61,11 @@ class KPIItem(BaseModel):
 class MarketingStrategy(BaseModel):
     """
     Represents the final structured marketing strategy synthesized by the agent.
-    All fields are optional because filler should not be forced if information is insufficient.
-    Each list field contains concise, self-contained plain-text strategy points.
+    Contains exactly 9 fixed, standard sections in a fixed order.
+    Configured to ignore extra fields (such as legacy additional_sections) for backward compatibility.
     """
+    model_config = ConfigDict(extra="ignore")
+
     business_overview: Optional[List[str]] = Field(
         default=None,
         description="High-level overview of the business, its core market, and strategic context."
@@ -99,10 +101,6 @@ class MarketingStrategy(BaseModel):
     action_plan: Optional[List[str]] = Field(
         default=None,
         description="Phased implementation roadmap and action steps."
-    )
-    additional_sections: Optional[Dict[str, List[str]]] = Field(
-        default=None,
-        description="Domain-specific or custom strategic sections relevant to the business."
     )
 
     @field_validator(
@@ -162,18 +160,5 @@ class MarketingStrategy(BaseModel):
                 elif isinstance(item, (dict, KPIItem)):
                     coerced.append(item)
             return coerced
-        return v
-
-    @field_validator("additional_sections", mode="before")
-    @classmethod
-    def coerce_additional_sections(cls, v: Any) -> Any:
-        if isinstance(v, dict):
-            new_dict = {}
-            for key, val in v.items():
-                if isinstance(val, str):
-                    new_dict[key] = [val] if val.strip() else []
-                else:
-                    new_dict[key] = val
-            return new_dict
         return v
 
