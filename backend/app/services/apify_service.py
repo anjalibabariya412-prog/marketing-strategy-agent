@@ -1,10 +1,11 @@
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from apify_client import ApifyClientAsync
 
 from backend.app.core.config import settings
+from backend.app.core.progress_notifier import emit_progress
 from backend.app.models.parsed_url import ParsedURL
 from backend.app.models.scraped_result import ApifyScrapeResult
 from backend.app.services.firecrawl_service import scrape_website_url
@@ -548,13 +549,13 @@ async def scrape_single_parsed_url(
 
 async def scrape_parsed_urls(
     parsed_urls: List[ParsedURL],
+    on_url_complete: Optional[Callable[[ParsedURL, Any], None]] = None,
 ) -> List[ApifyScrapeResult]:
     """
     Scrape multiple ParsedURL objects concurrently.
 
-    asyncio.gather() allows independent Apify scraping tasks
-    to run concurrently instead of waiting for each URL
-    one by one.
+    asyncio.gather() allows independent Apify and Firecrawl scraping tasks
+    to run concurrently instead of waiting for each URL one by one.
 
     The returned results preserve the same order as parsed_urls.
     """
@@ -565,14 +566,68 @@ async def scrape_parsed_urls(
     if not parsed_urls:
         return []
 
+    valid_urls = [u for u in parsed_urls if u.is_valid]
+    has_website = any(u.platform == "website" for u in valid_urls)
+    has_social = any(u.platform != "website" for u in valid_urls)
+
+    if has_website and has_social:
+        emit_progress(
+            "Reviewing your online presence...",
+            "Analyzing your website and social media profiles in parallel.",
+        )
+    elif has_website:
+        emit_progress(
+            "Reviewing your website...",
+            "Analyzing your website content with Firecrawl.",
+        )
+    elif has_social:
+        emit_progress(
+            "Reviewing your social media presence...",
+            "Gathering insights from your social media profiles.",
+        )
+
+    # Track pending platforms to report accurate status as parallel operations finish
+    pending_platforms: List[str] = [u.platform for u in valid_urls]
+
+    async def _wrapped_scrape(parsed_url: ParsedURL):
+        try:
+            res = await scrape_single_parsed_url(parsed_url)
+        except Exception as exc:
+            res = exc
+
+        if on_url_complete:
+            try:
+                on_url_complete(parsed_url, res)
+            except Exception:
+                pass
+
+        try:
+            if parsed_url.platform in pending_platforms:
+                pending_platforms.remove(parsed_url.platform)
+
+            rem_web = any(p == "website" for p in pending_platforms)
+            rem_soc = any(p != "website" for p in pending_platforms)
+
+            if rem_soc and not rem_web and has_website:
+                emit_progress(
+                    "Reviewing your social media presence...",
+                    "Website analysis complete. Continuing social media review.",
+                )
+            elif rem_web and not rem_soc and has_social:
+                emit_progress(
+                    "Reviewing your website...",
+                    "Social media analysis complete. Continuing website review.",
+                )
+        except Exception:
+            pass
+
+        return res
+
     # ---------------------------------------------------------
     # 2. Run all URL scraping tasks concurrently
     # ---------------------------------------------------------
     results_or_exceptions = await asyncio.gather(
-        *(
-            scrape_single_parsed_url(parsed_url)
-            for parsed_url in parsed_urls
-        ),
+        *(_wrapped_scrape(parsed_url) for parsed_url in parsed_urls),
         return_exceptions=True,
     )
 

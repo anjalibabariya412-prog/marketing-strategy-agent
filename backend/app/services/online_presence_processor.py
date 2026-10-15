@@ -611,7 +611,6 @@ def process_online_presence(
         llm_output = get_llm_response(
             system_prompt=ONLINE_PRESENCE_SYSTEM_PROMPT,
             prompt=user_prompt,
-            temperature=0.2,
             operation="online_presence_analysis",
             strategy_request_id=strategy_request_id,
             conversation_id=conversation_id,

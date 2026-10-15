@@ -22,4 +22,5 @@ from backend.app.db.orm import chat_message as _cm_module  # noqa: E402, F401
 from backend.app.db.orm import strategy as _st_module  # noqa: E402, F401
 from backend.app.db.orm import llm_usage as _lu_module  # noqa: E402, F401
 from backend.app.db.orm import uploaded_document as _ud_module  # noqa: E402, F401
+from backend.app.db.orm import revision_message as _rm_module  # noqa: E402, F401
 # fmt: on

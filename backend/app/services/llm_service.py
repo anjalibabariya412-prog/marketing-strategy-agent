@@ -247,8 +247,9 @@ def _persist_llm_usage(
 
 
 def get_llm_response(
-    prompt: str,
-    system_prompt: str = None,
+    prompt: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    messages: Optional[list] = None,
     response_format: dict = None,
     temperature: float = None,
     model: str = None,
@@ -259,20 +260,26 @@ def get_llm_response(
     provider: str = "openai",
 ) -> str:
     """
-    Sends a prompt to OpenAI LLM, logs and persists usage to the database, and returns the response text.
+    Sends a prompt or message list to OpenAI LLM, logs and persists usage to the database, and returns the response text.
     Preserves existing return type (str) and behavior for all callers.
     """
     target_model = model or settings.openai_model
     client = OpenAI(api_key=settings.openai_api_key)
 
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+    if messages is not None:
+        call_messages = list(messages)
+        if system_prompt and not any(m.get("role") == "system" for m in call_messages):
+            call_messages.insert(0, {"role": "system", "content": system_prompt})
+    else:
+        call_messages = []
+        if system_prompt:
+            call_messages.append({"role": "system", "content": system_prompt})
+        if prompt is not None:
+            call_messages.append({"role": "user", "content": prompt})
 
     kwargs = {
         "model": target_model,
-        "messages": messages,
+        "messages": call_messages,
     }
     if response_format:
         kwargs["response_format"] = response_format

@@ -19,6 +19,18 @@ const STANDARD_SECTIONS = [
   { key: 'action_plan', label: 'Action Plan & Timeline', category: 'Execution' },
 ];
 
+const SECTION_NAME_MAP = {
+  business_overview: 'Business Overview',
+  target_audience_insights: 'Target Audience & Insights',
+  competitive_positioning: 'Competitive Positioning',
+  value_proposition: 'Value Proposition & Positioning',
+  marketing_channels_and_tactics: 'Marketing Channels & Tactics',
+  customer_acquisition_approach: 'Customer Acquisition Approach',
+  budget_considerations: 'Budget Considerations & Allocation',
+  kpis: 'KPIs & Success Metrics',
+  action_plan: 'Action Plan & Timeline',
+};
+
 const getReportDescription = (goal) => {
   if (!goal || !goal.trim()) {
     return 'A comprehensive, tailored marketing strategy to drive growth and achieve business objectives.';
@@ -118,6 +130,22 @@ const Icons = {
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
     </svg>
+  ),
+  MessageSquare: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  ),
+  ArrowLeft: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </svg>
+  ),
+  Edit: () => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
   )
 };
 
@@ -151,7 +179,22 @@ const SmartSectionRenderer = ({ content }) => {
     return <p className="section-text-empty">No details provided for this section.</p>;
   }
 
-  const markdownText = items.join('\n\n');
+  const formatItem = (item) => {
+    if (typeof item === 'string') return item.trim();
+    if (typeof item === 'object' && item !== null) {
+      if (item.label && item.description) {
+        const amt = item.amount ? ` (${item.amount})` : '';
+        return `**${item.label}**${amt}: ${item.description}`;
+      }
+      if (item.metric && item.target) {
+        return `**${item.metric}**: ${item.target} — ${item.description || ''}`;
+      }
+      return JSON.stringify(item);
+    }
+    return String(item);
+  };
+
+  const markdownText = items.map(formatItem).join('\n\n');
 
   return (
     <div className="report-markdown-body">
@@ -539,6 +582,14 @@ const validateBudgetAmount = (val) => {
 };
 
 
+// Initial message for Strategy Revision Chatbot (Phase 1)
+const REVISION_INITIAL_MESSAGE = {
+  id: 'rev_initial',
+  sender: 'agent',
+  content: "Welcome! What would you like to change or improve in your marketing strategy? Tell me your requirements, and I’ll help you refine your strategy.",
+};
+
+
 function App() {
   // Form State
   const [formData, setFormData] = useState({
@@ -554,6 +605,16 @@ function App() {
   const [formErrors, setFormErrors] = useState({});
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [startError, setStartError] = useState(null);
+  const [progressStatus, setProgressStatus] = useState(null);
+  const startAbortControllerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (startAbortControllerRef.current) {
+        startAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // PDF Upload State
   const [selectedFile, setSelectedFile] = useState(null);
@@ -586,6 +647,21 @@ function App() {
   const [strategy, setStrategy] = useState(null);
   const [loadingStrategy, setLoadingStrategy] = useState(false);
   const [strategyError, setStrategyError] = useState(null);
+
+  // Strategy Revision Chatbot State
+  const [strategyRequestId, setStrategyRequestId] = useState(null);
+  const [isRevisionChatOpen, setIsRevisionChatOpen] = useState(false);
+  const [revisionMessages, setRevisionMessages] = useState([REVISION_INITIAL_MESSAGE]);
+  const [revisionInput, setRevisionInput] = useState('');
+  const [revisionLoading, setRevisionLoading] = useState(false);
+  const [revisionError, setRevisionError] = useState(null);
+  const [revisionState, setRevisionState] = useState(null);
+  const [applyingRevision, setApplyingRevision] = useState(false);
+  const [strategyRefreshError, setStrategyRefreshError] = useState(null);
+
+  const revisionTextareaRef = useRef(null);
+  const revisionMessagesRef = useRef(null);
+  const revisionMessagesEndRef = useRef(null);
 
 
 
@@ -695,6 +771,51 @@ function App() {
     }
   }, [isCompleted, threadId]);
 
+  // Auto-scroll revision chat on new message or when opened
+  useEffect(() => {
+    if (isRevisionChatOpen && revisionMessagesEndRef.current) {
+      revisionMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [isRevisionChatOpen, revisionMessages]);
+
+  // Focus textarea when revision chat opens
+  useEffect(() => {
+    if (isRevisionChatOpen && revisionTextareaRef.current) {
+      revisionTextareaRef.current.focus();
+    }
+  }, [isRevisionChatOpen]);
+
+  const fetchRevisionHistory = async (targetId) => {
+    const idToUse = targetId || strategyRequestId || threadId;
+    if (!idToUse) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/strategy-requests/${encodeURIComponent(idToUse)}/revisions/messages`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.messages && data.messages.length > 0) {
+          const loaded = data.messages.map((m) => ({
+            id: `rev_${m.sender}_${m.id}`,
+            sender: m.sender === 'assistant' ? 'agent' : 'user',
+            content: m.content,
+          }));
+          setRevisionMessages([REVISION_INITIAL_MESSAGE, ...loaded]);
+        }
+        if (data.revision_state) {
+          setRevisionState(data.revision_state);
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch revision history:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (isRevisionChatOpen && (strategyRequestId || threadId)) {
+      fetchRevisionHistory();
+    }
+  }, [isRevisionChatOpen]);
+
   const fetchStrategy = async () => {
     setLoadingStrategy(true);
     setStrategyError(null);
@@ -708,6 +829,9 @@ function App() {
 
       const data = await response.json();
       setStrategy(data.strategy);
+      if (data.strategy_request_id) {
+        setStrategyRequestId(data.strategy_request_id);
+      }
     } catch (err) {
       console.error('Failed to fetch strategy:', err);
       setStrategyError(err.message || 'Failed to load strategy. Please try again.');
@@ -769,6 +893,41 @@ function App() {
     setShowSummaryScreen(false);
   };
 
+  const handleStartSuccess = (data) => {
+    if (data.thread_id) setThreadId(data.thread_id);
+    if (data.strategy_request_id) setStrategyRequestId(data.strategy_request_id);
+    if (data.session_intro) setSessionIntro(data.session_intro);
+    setStatus(data.status);
+    setRequirementId(data.requirement_id || null);
+
+    if (data.status === 'completed') {
+      setIsTransitioningToStrategy(true);
+      setTimeout(() => setIsCompleted(true), 6000);
+    } else if (data.question) {
+      const summaryContent = extractBusinessSummary(data.question);
+      const dynamicQuestion = extractDynamicQuestion(data.question);
+      setBusinessSummaryText(summaryContent);
+
+      const staticIntroText = "Hi! Let's personalize your marketing strategy with a few quick questions based on your business and goals.";
+      const combinedInitialContent = `${staticIntroText}\n\n${dynamicQuestion}`;
+
+      const combinedInitialMsg = {
+        id: `msg_q1_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        sender: 'agent',
+        content: combinedInitialContent,
+        requirementId: data.requirement_id || null,
+        timestamp: new Date().toISOString(),
+      };
+
+      setMessages([combinedInitialMsg]);
+
+      setCurrentQuestion(dynamicQuestion);
+      setQuestionNumber(1);
+      setAnswerInput('');
+      setShowSummaryScreen(true);
+    }
+  };
+
   const handleStartSubmit = async (e) => {
     e.preventDefault();
     if (formSubmitting || fileUploading) return;
@@ -808,6 +967,28 @@ function App() {
     setFormSubmitting(true);
     setStartError(null);
 
+    const hasWebsite = Boolean(formData.website_social_links && formData.website_social_links.trim());
+    const hasDoc = Boolean(uploadedDocumentId || pastMarketingDocText);
+
+    let initialMessage = 'Analyzing your business...';
+    let initialDetail = 'Reviewing your business profile and goals.';
+
+    if (hasDoc) {
+      initialMessage = 'Processing your uploaded document...';
+      initialDetail = 'Analyzing uploaded document insights and context.';
+    } else if (hasWebsite) {
+      initialMessage = 'Reviewing your online presence...';
+      initialDetail = 'Connecting to review your online presence.';
+    }
+
+    setProgressStatus({
+      message: initialMessage,
+      detail: initialDetail,
+    });
+
+    const abortController = new AbortController();
+    startAbortControllerRef.current = abortController;
+
     const payload = {
       company_name: formData.company_name.trim(),
       product_or_service: formData.product_or_service.trim(),
@@ -826,8 +1007,12 @@ function App() {
     try {
       const response = await fetch(`${API_BASE_URL}/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream, application/json',
+        },
         body: JSON.stringify(payload),
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -838,43 +1023,78 @@ function App() {
         throw new Error(detailMsg || `Server returned status ${response.status}`);
       }
 
-      const data = await response.json();
-      if (data.thread_id) setThreadId(data.thread_id);
-      if (data.session_intro) setSessionIntro(data.session_intro);
-      setStatus(data.status);
-      setRequirementId(data.requirement_id || null);
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream') && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let currentEvent = null;
+        let completedData = null;
 
-      if (data.status === 'completed') {
-        setIsTransitioningToStrategy(true);
-        setTimeout(() => setIsCompleted(true), 6000);
-      } else if (data.question) {
-        const summaryContent = extractBusinessSummary(data.question);
-        const dynamicQuestion = extractDynamicQuestion(data.question);
-        setBusinessSummaryText(summaryContent);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
 
-        const staticIntroText = "Hi! Let's personalize your marketing strategy with a few quick questions based on your business and goals.";
-        const combinedInitialContent = `${staticIntroText}\n\n${dynamicQuestion}`;
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-        const combinedInitialMsg = {
-          id: `msg_q1_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          sender: 'agent',
-          content: combinedInitialContent,
-          requirementId: data.requirement_id || null,
-          timestamp: new Date().toISOString(),
-        };
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) {
+              currentEvent = null;
+              continue;
+            }
+            if (line.startsWith('event:')) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              const dataStr = line.slice(5).trim();
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (currentEvent === 'progress' || parsed.type === 'progress') {
+                  if (parsed.message) {
+                    setProgressStatus({
+                      message: parsed.message,
+                      detail: parsed.detail || null,
+                    });
+                  }
+                } else if (currentEvent === 'complete' || (parsed && parsed.status && !parsed.error)) {
+                  completedData = parsed;
+                } else if (currentEvent === 'error' || (parsed && parsed.error)) {
+                  throw new Error(parsed.error || 'Workflow execution error');
+                }
+              } catch (parseErr) {
+                if (currentEvent === 'error') {
+                  throw new Error(dataStr);
+                }
+                if (parseErr.message && !parseErr.message.includes('JSON')) {
+                  throw parseErr;
+                }
+              }
+            }
+          }
+        }
 
-        setMessages([combinedInitialMsg]);
-
-        setCurrentQuestion(dynamicQuestion);
-        setQuestionNumber(1);
-        setAnswerInput('');
-        setShowSummaryScreen(true);
+        if (completedData) {
+          handleStartSuccess(completedData);
+        } else {
+          throw new Error('Analysis completed without returning strategy data. Please try again.');
+        }
+      } else {
+        const data = await response.json();
+        handleStartSuccess(data);
       }
     } catch (err) {
+      if (err.name === 'AbortError') {
+        console.log('Start request was aborted.');
+        return;
+      }
       console.error('Failed to start conversation:', err);
       setStartError(err.message || 'Failed to submit business details. Please try again.');
     } finally {
       setFormSubmitting(false);
+      setProgressStatus(null);
+      startAbortControllerRef.current = null;
     }
   };
 
@@ -948,6 +1168,148 @@ function App() {
       if (!questionLoading && answerInput.trim()) {
         handleNextQuestion();
       }
+    }
+  };
+
+  // Handler: Send Revision Message to Backend
+  const handleSendRevisionMessage = async (customMessage) => {
+    const textToSend = typeof customMessage === 'string' ? customMessage : revisionInput;
+    const trimmed = textToSend.trim();
+    if (!trimmed || revisionLoading) return;
+
+    const idToUse = strategyRequestId || threadId;
+    if (!idToUse) {
+      setRevisionError('Missing strategy session identifier. Please try reloading the page.');
+      return;
+    }
+
+    if (!customMessage) {
+      setRevisionInput('');
+    }
+
+    const tempUserId = `rev_user_${Date.now()}`;
+    const userMsg = {
+      id: tempUserId,
+      sender: 'user',
+      content: trimmed,
+    };
+
+    setRevisionError(null);
+    setRevisionLoading(true);
+    setRevisionMessages((prev) => [...prev, userMsg]);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/strategy-requests/${encodeURIComponent(idToUse)}/revisions/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmed }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const detailMsg = errorData && errorData.detail
+          ? (Array.isArray(errorData.detail) ? errorData.detail.map((d) => d.msg).join(', ') : errorData.detail)
+          : null;
+        throw new Error(detailMsg || `Server returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      const assistantMsg = {
+        id: data.message_id ? `rev_agent_${data.message_id}` : `rev_agent_${Date.now()}`,
+        sender: 'agent',
+        content: data.reply,
+      };
+
+      setRevisionMessages((prev) => [...prev, assistantMsg]);
+      if (data.revision_state) {
+        setRevisionState(data.revision_state);
+      }
+    } catch (err) {
+      console.error('Failed to send revision message:', err);
+      // Remove the unconfirmed message so user can retry with the same input
+      setRevisionMessages((prev) => prev.filter((m) => m.id !== tempUserId));
+      if (!customMessage) {
+        setRevisionInput(trimmed);
+      }
+      setRevisionError(err.message || 'Failed to send your revision request. Please try again.');
+    } finally {
+      setRevisionLoading(false);
+    }
+  };
+
+  const handleRevisionKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendRevisionMessage();
+    }
+  };
+
+  const handleApplyRevisions = async () => {
+    if (applyingRevision) return;
+    const idToUse = strategyRequestId || threadId;
+    if (!idToUse) {
+      setRevisionError('Missing strategy session identifier. Please try reloading the page.');
+      return;
+    }
+
+    setApplyingRevision(true);
+    setRevisionError(null);
+    setStrategyRefreshError(null);
+
+    let data = null;
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/strategy-requests/${encodeURIComponent(idToUse)}/revisions/apply`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        const detailMsg = errData && errData.detail
+          ? (Array.isArray(errData.detail) ? errData.detail.map((d) => d.msg).join(', ') : errData.detail)
+          : `Server error (${response.status})`;
+        throw new Error(detailMsg);
+      }
+
+      data = await response.json();
+    } catch (applyErr) {
+      console.error('Failed to apply revisions:', applyErr);
+      setRevisionError(applyErr.message || 'Failed to apply revisions to the strategy. Please try again.');
+      setApplyingRevision(false);
+      return;
+    }
+
+    // Step 2: Handle post-application refresh and state updates safely
+    try {
+      if (data && data.revision_state) {
+        setRevisionState(data.revision_state);
+      }
+
+      // Update the React strategy state with the complete updated strategy
+      if (data && data.strategy) {
+        setStrategy(data.strategy);
+      } else {
+        // Fallback: fetch latest persisted strategy from backend
+        await fetchStrategy();
+      }
+
+      const confirmMsg = {
+        id: `rev_apply_${Date.now()}`,
+        sender: 'agent',
+        content: `🎉 ${data?.message || 'Strategy revisions successfully applied and persisted.'}`,
+      };
+      setRevisionMessages((prev) => [...prev, confirmMsg]);
+    } catch (refreshErr) {
+      console.error('Failed to update frontend report after revision applied:', refreshErr);
+      setStrategyRefreshError('Revisions were saved successfully in PostgreSQL, but refreshing the report failed. Click "Retry Refresh" to reload.');
+    } finally {
+      setApplyingRevision(false);
     }
   };
 
@@ -1238,6 +1600,20 @@ function App() {
                 </button>
               </div>
             </form>
+
+            {formSubmitting && (
+              <div className="start-progress-indicator" role="status" aria-live="polite">
+                <div className="start-progress-header">
+                  <span className="start-progress-spinner" aria-hidden="true" />
+                  <span className="start-progress-message">
+                    {progressStatus?.message || 'Analyzing your business...'}
+                  </span>
+                </div>
+                {progressStatus?.detail && (
+                  <p className="start-progress-detail">{progressStatus.detail}</p>
+                )}
+              </div>
+            )}
           </div>
         ) : showSummaryScreen ? (
           /* Business Summary Transition Screen */
@@ -1370,6 +1746,208 @@ function App() {
             )}
           </div>
         )
+      ) : isRevisionChatOpen ? (
+        /* Dedicated Revision Chatbot Screen */
+        <div className="revision-screen-wrapper">
+          <div className="revision-top-bar">
+            <button
+              type="button"
+              className="btn-back-to-strategy"
+              onClick={() => setIsRevisionChatOpen(false)}
+            >
+              <Icons.ArrowLeft />
+              <span>Back to Strategy</span>
+            </button>
+          </div>
+
+          <div className="card chat-card revision-chat-card">
+            <div className="chat-container">
+              {/* Chat Header */}
+              <div className="chat-header revision-chat-header">
+                <button
+                  type="button"
+                  className="btn-header-back"
+                  onClick={() => setIsRevisionChatOpen(false)}
+                  aria-label="Back to Strategy"
+                  title="Back to Strategy"
+                >
+                  <Icons.ArrowLeft />
+                </button>
+                <h2 className="chat-header-title">Marketing Strategy Assistant</h2>
+                <button
+                  type="button"
+                  className="btn-close-revision"
+                  onClick={() => setIsRevisionChatOpen(false)}
+                  aria-label="Back to Strategy"
+                  title="Back to Strategy"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Chat Messages Feed */}
+              <div className="chat-messages-container" ref={revisionMessagesRef}>
+                {revisionMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`chat-message-row ${message.sender === 'agent' ? 'agent-row' : 'user-row'}`}
+                  >
+                    {message.sender === 'agent' ? (
+                      <div className="chat-avatar agent-avatar" aria-hidden="true">
+                        <Icons.Bot />
+                      </div>
+                    ) : null}
+                    <div className={`chat-bubble ${message.sender === 'agent' ? 'agent-bubble' : 'user-bubble'}`}>
+                      {message.sender === 'agent' ? (
+                        <div className="chat-bubble-text">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkBreaks]}
+                            components={{
+                              p: ({ node: _node, ...props }) => <p className="chat-bubble-paragraph" {...props} />,
+                              strong: ({ node: _node, ...props }) => <strong className="md-strong" {...props} />,
+                              em: ({ node: _node, ...props }) => <em className="md-em" {...props} />,
+                              ul: ({ node: _node, ...props }) => <ul className="md-ul" {...props} />,
+                              ol: ({ node: _node, ...props }) => <ol className="md-ol" {...props} />,
+                              li: ({ node: _node, ...props }) => <li className="md-li" {...props} />,
+                            }}
+                          >
+                            {message.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <p className="chat-bubble-text">{message.content}</p>
+                      )}
+                    </div>
+                    {message.sender === 'user' ? (
+                      <div className="chat-avatar user-avatar" aria-hidden="true">
+                        <Icons.User />
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+
+                {/* Temporary Agent Thinking Indicator */}
+                {revisionLoading && (
+                  <div className="chat-message-row agent-row thinking-row">
+                    <div className="chat-avatar agent-avatar" aria-hidden="true">
+                      <Icons.Bot />
+                    </div>
+                    <div className="chat-bubble agent-bubble thinking-bubble">
+                      <div className="typing-dots" aria-label="Thinking">
+                        <span className="dot" />
+                        <span className="dot" />
+                        <span className="dot" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Revision Error Banner */}
+                {revisionError && (
+                  <div className="error-banner chat-error-banner" style={{ margin: '8px 16px' }}>
+                    {revisionError}
+                  </div>
+                )}
+
+                {/* Strategy Refresh Error Banner */}
+                {strategyRefreshError && (
+                  <div className="error-banner chat-error-banner" style={{ margin: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                    <span>{strategyRefreshError}</span>
+                    <button
+                      type="button"
+                      className="btn-quick-action btn-quick-confirm"
+                      style={{ padding: '4px 10px', fontSize: '11px', whiteSpace: 'nowrap' }}
+                      onClick={async () => {
+                        try {
+                          await fetchStrategy();
+                          setStrategyRefreshError(null);
+                        } catch (e) {
+                          console.error('Retry refresh failed:', e);
+                        }
+                      }}
+                    >
+                      ↻ Retry Refresh
+                    </button>
+                  </div>
+                )}
+
+                <div ref={revisionMessagesEndRef} />
+              </div>
+
+              {/* Chat Composer */}
+              <div className="chat-composer-container">
+                {/* Quick Confirmation Actions */}
+                {revisionState &&
+                  (revisionState.status === 'proposal_ready' || revisionState.is_ready_for_confirmation) &&
+                  revisionState.confirmation_status !== 'confirmed' &&
+                  revisionState.confirmation_status !== 'rejected' &&
+                  revisionState.application_status !== 'applied' && (
+                    <div className="revision-quick-actions">
+                      <button
+                        type="button"
+                        className="btn-quick-action btn-quick-confirm"
+                        disabled={revisionLoading || applyingRevision}
+                        onClick={() => handleSendRevisionMessage('Yes, please confirm and save this revision proposal.')}
+                      >
+                        ✓ Confirm Proposal
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-quick-action btn-quick-reject"
+                        disabled={revisionLoading || applyingRevision}
+                        onClick={() => handleSendRevisionMessage('Please cancel this revision proposal.')}
+                      >
+                        ✕ Cancel / Reject
+                      </button>
+                    </div>
+                  )}
+
+                {/* Apply Confirmed Revisions Action */}
+                {revisionState &&
+                  revisionState.confirmation_status === 'confirmed' &&
+                  revisionState.application_status !== 'applied' &&
+                  revisionState.status !== 'applied' && (
+                    <div className="revision-quick-actions">
+                      <button
+                        type="button"
+                        className="btn-quick-action btn-quick-apply"
+                        disabled={applyingRevision || revisionLoading}
+                        onClick={handleApplyRevisions}
+                      >
+                        {applyingRevision ? '⏳ Applying Revisions...' : '🚀 Apply Revisions to Strategy'}
+                      </button>
+                    </div>
+                  )}
+
+                <textarea
+                  ref={revisionTextareaRef}
+                  className="chat-textarea"
+                  value={revisionInput}
+                  onChange={(e) => {
+                    setRevisionInput(e.target.value);
+                    if (revisionError) setRevisionError(null);
+                  }}
+                  onKeyDown={handleRevisionKeyDown}
+                  placeholder="Describe the changes you want to make..."
+                  disabled={revisionLoading}
+                  rows={2}
+                />
+                <button
+                  type="button"
+                  className="btn-primary chat-send-btn"
+                  onClick={() => handleSendRevisionMessage()}
+                  disabled={revisionLoading || !revisionInput.trim()}
+                >
+                  <span>Send</span>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : (
         /* Redesigned React Frontend Report Presentation */
         <div className="strategy-report-wrapper">
@@ -1386,6 +1964,27 @@ function App() {
             </div>
           ) : strategy ? (
             <div className="strategy-report-container">
+              {strategyRefreshError && (
+                <div className="error-banner" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <span>{strategyRefreshError}</span>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ padding: '6px 14px', fontSize: '13px' }}
+                    onClick={async () => {
+                      try {
+                        await fetchStrategy();
+                        setStrategyRefreshError(null);
+                      } catch (e) {
+                        console.error('Retry refresh failed:', e);
+                      }
+                    }}
+                  >
+                    ↻ Retry Refresh
+                  </button>
+                </div>
+              )}
+
               {/* Header */}
               <header className="report-header-centered">
                 <div className="report-header-eyebrow">STRATEGIC MARKETING REPORT</div>
@@ -1454,6 +2053,24 @@ function App() {
                       </section>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* Request Changes Action */}
+              <div className="report-bottom-actions">
+                <div className="request-changes-container">
+                  <p className="request-changes-hint">
+                    <Icons.Edit />
+                    <span>Want to refine any part of your strategy?</span>
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-primary btn-request-changes"
+                    onClick={() => setIsRevisionChatOpen(true)}
+                  >
+                    <Icons.MessageSquare />
+                    <span>Request Changes</span>
+                  </button>
                 </div>
               </div>
 

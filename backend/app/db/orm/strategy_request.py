@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from .llm_usage import LLMUsage
     from .online_presence_source import OnlinePresenceSource
     from .uploaded_document import UploadedDocument
+    from .revision_message import RevisionMessage
 
 
 class StrategyRequest(Base):
@@ -122,6 +123,13 @@ class StrategyRequest(Base):
     uploaded_documents: Mapped[List["UploadedDocument"]] = relationship(
         "UploadedDocument",
         back_populates="strategy_request",
+    )
+
+    revision_messages: Mapped[List["RevisionMessage"]] = relationship(
+        "RevisionMessage",
+        back_populates="strategy_request",
+        cascade="all, delete-orphan",
+        order_by="RevisionMessage.id",
     )
 
 

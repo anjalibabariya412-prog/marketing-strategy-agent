@@ -12,6 +12,7 @@ from backend.app.agent.question_selection import prepare_next_question, generate
 from backend.app.agent.answer_processing import process_answer_for_requirement, process_answer_and_plan_next
 from backend.app.agent.sufficiency_check import is_sufficient
 from backend.app.agent.strategy_generation import generate_strategy
+from backend.app.core.progress_notifier import emit_progress
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ def analyze_node(state: MarketingAgentState) -> MarketingAgentState:
     Prepares the first contextual message in this upstream node so that initial question
     and first_message_generated flag are committed to checkpoint before ask_node interrupts.
     """
+    emit_progress("Analyzing your business...", "Evaluating your marketing requirements.")
     if not state.analysis_done:
         logger.info("Graph Node [analyze]: Running analyze_relevance()")
         success = analyze_relevance(state)
@@ -67,6 +69,7 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
         f"pending_req: '{state.pending_requirement_id}'"
     )
 
+    emit_progress("Preparing your personalized questions...", "Formulating follow-up questions to refine your plan.")
     # 1. Promote pending question if present and valid, otherwise prepare next question if no active question exists
     if not state.current_question or not state.active_requirement_id:
         if not state.first_message_generated:
@@ -136,6 +139,7 @@ def generate_node(state: MarketingAgentState) -> MarketingAgentState:
     storing the output in state.final_strategy.
     """
     logger.info("Graph Node [generate]: Running generate_strategy()")
+    emit_progress("Preparing your marketing strategy...", "Generating tailored marketing recommendations.")
     state.pending_question = None
     state.pending_requirement_id = None
     strategy = generate_strategy(state)

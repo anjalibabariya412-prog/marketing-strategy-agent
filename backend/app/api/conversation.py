@@ -1,10 +1,18 @@
 from datetime import datetime, timezone
 import asyncio
+import json
 import logging
 import uuid
-from typing import Optional
-from fastapi import APIRouter, HTTPException, status
+from typing import Callable, Optional
+from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from langgraph.types import Command
+
+from backend.app.core.progress_notifier import (
+    emit_progress,
+    set_progress_notifier,
+    reset_progress_notifier,
+)
 
 from backend.app.models.agent_state import MarketingAgentState
 from backend.app.models.business_context import BusinessContext
@@ -29,10 +37,12 @@ from backend.app.services.requirement_persistence import save_information_requir
 from backend.app.services.chat_message_persistence import save_chat_message
 from backend.app.services.strategy_persistence import save_strategy
 from backend.app.db.session import SessionLocal
+from backend.app.db.orm.strategy import Strategy
 from backend.app.db.orm.strategy_request import StrategyRequest
 from backend.app.db.orm.business import Business
 from backend.app.db.orm.conversation import Conversation
 from backend.app.db.orm.uploaded_document import UploadedDocument
+from backend.app.models.marketing_strategy import MarketingStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -83,16 +93,24 @@ def determine_session_intro(
         return "A few short questions to better understand your business and create a personalized marketing strategy."
 
 
-@router.post("/start", response_model=StartResponse, status_code=status.HTTP_200_OK)
-def start_conversation(request: StartRequest):
+def execute_start_flow(
+    request: StartRequest,
+    on_progress: Optional[Callable[[str, Optional[str]], None]] = None,
+) -> StartResponse:
     """
-    Starts a new marketing strategy conversation using structured initial business context,
-    persists StrategyRequest, Business, and Conversation records, initializes state, and invokes the LangGraph workflow.
+    Executes the start workflow synchronously, emitting real-time progress notifications
+    when a progress notifier is provided or registered in context.
     """
+    token = set_progress_notifier(on_progress)
     try:
         thread_id = str(uuid.uuid4())
         conv_id = uuid.UUID(thread_id)
         logger.info(f"Starting new conversation with thread_id: '{thread_id}'")
+
+        if request.uploaded_document_id:
+            emit_progress("Processing your uploaded document...", "Analyzing uploaded document insights and context.")
+        else:
+            emit_progress("Analyzing your business...", "Reviewing your business profile and goals.")
 
         # 1. Persist initial StrategyRequest, Business, and Conversation records
         strategy_request_id = None
@@ -207,6 +225,7 @@ def start_conversation(request: StartRequest):
                 parsed_urls = parse_website_social_links(request.website_social_links)
                 if parsed_urls:
                     scraped_results = asyncio.run(scrape_parsed_urls(parsed_urls))
+                    emit_progress("Analyzing your online presence...", "Synthesizing online profile information.")
                     online_presence_ctx = process_online_presence(
                         scraped_results,
                         context,
@@ -246,6 +265,7 @@ def start_conversation(request: StartRequest):
 
         # 4. Invoke graph with thread_id config
         try:
+            emit_progress("Analyzing your business...", "Evaluating your marketing requirements.")
             config = {"configurable": {"thread_id": thread_id}}
             output = graph.invoke(state, config=config)
         except Exception as graph_err:
@@ -314,6 +334,7 @@ def start_conversation(request: StartRequest):
                 question=question_text,
                 requirement_id=req_id,
                 session_intro=session_intro_text,
+                strategy_request_id=str(strategy_request_id) if strategy_request_id else None,
             )
 
         # Persist final strategy if generated in /start
@@ -343,22 +364,115 @@ def start_conversation(request: StartRequest):
         except Exception as stage_err:
             logger.error(f"Failed to update StrategyRequest/Conversation completion status in /start: {stage_err}")
 
+        emit_progress("Preparing your marketing strategy...", "Finalizing your personalized marketing strategy.")
+
         return StartResponse(
             thread_id=thread_id,
             status="completed",
             question=None,
             requirement_id=None,
             session_intro=session_intro_text,
+            strategy_request_id=str(strategy_request_id) if strategy_request_id else None,
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in POST /start: {e}")
+        logger.error(f"Error in execute_start_flow: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while starting the conversation."
         )
+    finally:
+        reset_progress_notifier(token)
+
+
+async def stream_start_conversation(request: StartRequest):
+    """
+    Asynchronous SSE generator streaming dynamic progress events during conversation start.
+    Yields 'progress', 'complete', and 'error' SSE frames.
+    """
+    loop = asyncio.get_running_loop()
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    def on_progress(message: str, detail: Optional[str] = None):
+        payload = {"type": "progress", "message": message, "detail": detail}
+        loop.call_soon_threadsafe(event_queue.put_nowait, payload)
+
+    def worker():
+        try:
+            resp = execute_start_flow(request, on_progress=on_progress)
+            loop.call_soon_threadsafe(
+                event_queue.put_nowait,
+                {"type": "complete", "data": resp.model_dump()},
+            )
+        except HTTPException as http_exc:
+            loop.call_soon_threadsafe(
+                event_queue.put_nowait,
+                {"type": "error", "error": http_exc.detail},
+            )
+        except Exception as exc:
+            logger.error(f"Error in stream_start_conversation worker: {exc}")
+            loop.call_soon_threadsafe(
+                event_queue.put_nowait,
+                {"type": "error", "error": "An unexpected error occurred while starting the conversation."},
+            )
+        finally:
+            loop.call_soon_threadsafe(event_queue.put_nowait, None)
+
+    worker_task = asyncio.create_task(asyncio.to_thread(worker))
+
+    try:
+        while True:
+            item = await event_queue.get()
+            if item is None:
+                break
+            if item["type"] == "progress":
+                yield f"event: progress\ndata: {json.dumps(item)}\n\n"
+            elif item["type"] == "complete":
+                yield f"event: complete\ndata: {json.dumps(item['data'])}\n\n"
+            elif item["type"] == "error":
+                yield f"event: error\ndata: {json.dumps({'error': item['error']})}\n\n"
+    finally:
+        await worker_task
+
+
+@router.post("/start", status_code=status.HTTP_200_OK)
+def start_conversation(request: StartRequest, http_request: Request):
+    """
+    Starts a new marketing strategy conversation using structured initial business context,
+    persists StrategyRequest, Business, and Conversation records, initializes state, and invokes the LangGraph workflow.
+    Streams SSE updates when requested via Accept: text/event-stream or ?stream=true.
+    """
+    accept_header = http_request.headers.get("accept", "")
+    stream_param = http_request.query_params.get("stream", "").lower()
+
+    if "text/event-stream" in accept_header or stream_param in ("true", "1"):
+        return StreamingResponse(
+            stream_start_conversation(request),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    return execute_start_flow(request)
+
+
+@router.post("/start/stream")
+def start_conversation_stream(request: StartRequest):
+    """Explicit SSE streaming endpoint for conversation initialization."""
+    return StreamingResponse(
+        stream_start_conversation(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/reply", response_model=ReplyResponse, status_code=status.HTTP_200_OK)
@@ -532,6 +646,35 @@ def get_strategy(thread_id: str):
                 detail="thread_id query parameter is required."
             )
 
+        # Check database Strategy records first
+        try:
+            thread_uuid = uuid.UUID(thread_id.strip())
+            with SessionLocal() as db:
+                conv = db.query(Conversation).filter(Conversation.id == thread_uuid).first()
+                if not conv:
+                    sr = db.query(StrategyRequest).filter(StrategyRequest.id == thread_uuid).first()
+                    if sr and sr.conversation:
+                        conv = sr.conversation
+
+                if conv:
+                    strategy_request_id_str = str(conv.strategy_request_id) if conv.strategy_request_id else None
+                    latest_db_strategy = (
+                        db.query(Strategy)
+                        .filter(Strategy.conversation_id == conv.id)
+                        .order_by(Strategy.version.desc(), Strategy.created_at.desc())
+                        .first()
+                    )
+                    if latest_db_strategy and latest_db_strategy.strategy_json:
+                        validated_strat = MarketingStrategy.model_validate(latest_db_strategy.strategy_json)
+                        return StrategyResponse(
+                            thread_id=thread_id.strip(),
+                            status="completed",
+                            strategy=validated_strat,
+                            strategy_request_id=strategy_request_id_str,
+                        )
+        except Exception as db_lookup_err:
+            logger.debug(f"Database strategy lookup error, falling back to graph checkpoint: {db_lookup_err}")
+
         config = {"configurable": {"thread_id": thread_id.strip()}}
         snapshot = graph.get_state(config)
 
@@ -550,10 +693,20 @@ def get_strategy(thread_id: str):
                 detail="Strategy has not been generated yet for this conversation."
             )
 
+        strategy_request_id_str = None
+        try:
+            with SessionLocal() as db:
+                conv = db.query(Conversation).filter(Conversation.id == uuid.UUID(thread_id.strip())).first()
+                if conv and conv.strategy_request_id:
+                    strategy_request_id_str = str(conv.strategy_request_id)
+        except Exception as lookup_err:
+            logger.debug(f"Could not resolve strategy_request_id in get_strategy: {lookup_err}")
+
         return StrategyResponse(
             thread_id=thread_id.strip(),
             status="completed",
-            strategy=agent_state.final_strategy
+            strategy=agent_state.final_strategy,
+            strategy_request_id=strategy_request_id_str,
         )
 
     except HTTPException:

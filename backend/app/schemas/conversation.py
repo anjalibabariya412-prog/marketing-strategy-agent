@@ -111,6 +111,10 @@ class StartResponse(BaseModel):
         default=None,
         description="Dynamic session introduction sentence based on available context."
     )
+    strategy_request_id: Optional[str] = Field(
+        default=None,
+        description="Unique identifier for the associated StrategyRequest."
+    )
 
 
 class ReplyRequest(BaseModel):
@@ -166,4 +170,8 @@ class StrategyResponse(BaseModel):
     strategy: MarketingStrategy = Field(
         ...,
         description="The complete structured MarketingStrategy object."
+    )
+    strategy_request_id: Optional[str] = Field(
+        default=None,
+        description="Unique identifier for the associated StrategyRequest."
     )
