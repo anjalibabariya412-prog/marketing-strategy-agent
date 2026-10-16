@@ -86,8 +86,3 @@ class BusinessContext(BaseModel):
         default_factory=list,
         description="Extracted list of competitor names, brand names, or alternative solutions."
     )
-
-
-
-
-

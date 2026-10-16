@@ -1,5 +1,5 @@
 from backend.app.core.config import settings
-from backend.app.models.agent_state import MarketingAgentState
+from backend.app.schemas.agent.agent_state import MarketingAgentState
 
 
 def is_sufficient(state: MarketingAgentState) -> bool:

@@ -8,16 +8,16 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from backend.app.core.config import settings
 from backend.app.core.requirements_library import load_requirements_into_state, REQUIREMENTS_LIBRARY
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.business_context import BusinessContext
-from backend.app.models.information_requirement import (
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.business_context import BusinessContext
+from backend.app.schemas.agent.information_requirement import (
     InformationRequirement,
     RequirementStatus,
     create_dynamic_requirement,
     is_duplicate_requirement,
 )
-from backend.app.models.online_presence import OnlinePresenceContext, OnlineSourceSummary
-from backend.app.models.qa_turn import QATurn
+from backend.app.schemas.agent.online_presence import OnlinePresenceContext, OnlineSourceSummary
+from backend.app.schemas.agent.qa_turn import QATurn
 from backend.app.agent.sufficiency_check import is_sufficient
 from backend.app.agent.question_selection import select_next_requirement, prepare_next_question
 from backend.app.agent.answer_processing import process_answer_for_requirement, process_answer_and_plan_next

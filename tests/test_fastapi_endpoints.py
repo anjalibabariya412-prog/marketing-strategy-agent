@@ -133,8 +133,8 @@ def test_fastapi_endpoints():
 
 def test_website_social_links_validation():
     print("\n=== Testing Task 2: website_social_links Schema Validation ===")
-    from backend.app.schemas.conversation import StartRequest
-    from backend.app.models.business_context import BusinessContext
+    from backend.app.schemas.api.conversation import StartRequest
+    from backend.app.schemas.agent.business_context import BusinessContext
 
     base_payload = {
         "company_name": "Test Company",

@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 import uuid
 
-from backend.app.db.orm.chat_message import ChatMessage
+from backend.app.models.chat_message import ChatMessage
 from backend.app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 from typing import List
-from backend.app.models.information_requirement import InformationRequirement, RequirementStatus
-from backend.app.models.agent_state import MarketingAgentState
+from backend.app.schemas.agent.information_requirement import InformationRequirement, RequirementStatus
+from backend.app.schemas.agent.agent_state import MarketingAgentState
 
 REQUIREMENTS_LIBRARY: List[InformationRequirement] = [
     InformationRequirement(

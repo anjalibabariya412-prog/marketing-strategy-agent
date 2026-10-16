@@ -6,8 +6,8 @@ from apify_client import ApifyClientAsync
 
 from backend.app.core.config import settings
 from backend.app.core.progress_notifier import emit_progress
-from backend.app.models.parsed_url import ParsedURL
-from backend.app.models.scraped_result import ApifyScrapeResult
+from backend.app.schemas.agent.parsed_url import ParsedURL
+from backend.app.schemas.agent.scraped_result import ApifyScrapeResult
 from backend.app.services.firecrawl_service import scrape_website_url
 
 

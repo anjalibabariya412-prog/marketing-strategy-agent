@@ -13,12 +13,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from backend.app.main import app
 from backend.app.db.session import SessionLocal
-from backend.app.db.orm.strategy_request import StrategyRequest
-from backend.app.db.orm.business import Business
-from backend.app.db.orm.conversation import Conversation
-from backend.app.db.orm.strategy import Strategy
-from backend.app.db.orm.revision_message import RevisionMessage
-from backend.app.schemas.revision import ProposedSectionChange, RevisionState
+from backend.app.models.strategy_request import StrategyRequest
+from backend.app.models.business import Business
+from backend.app.models.conversation import Conversation
+from backend.app.models.strategy import Strategy
+from backend.app.models.revision_message import RevisionMessage
+from backend.app.schemas.agent.revision_state import ProposedSectionChange, RevisionState
 from backend.app.services.revision_service import save_revision_state
 
 client = TestClient(app)

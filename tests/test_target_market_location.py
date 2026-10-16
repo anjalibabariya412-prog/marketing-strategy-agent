@@ -8,15 +8,15 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from backend.app.core.config import settings
 from backend.app.core.requirements_library import load_requirements_into_state, REQUIREMENTS_LIBRARY
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.business_context import BusinessContext
-from backend.app.models.information_requirement import (
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.business_context import BusinessContext
+from backend.app.schemas.agent.information_requirement import (
     InformationRequirement,
     RequirementStatus,
     is_duplicate_requirement,
 )
-from backend.app.models.online_presence import OnlinePresenceContext, OnlineSourceSummary
-from backend.app.models.qa_turn import QATurn
+from backend.app.schemas.agent.online_presence import OnlinePresenceContext, OnlineSourceSummary
+from backend.app.schemas.agent.qa_turn import QATurn
 from backend.app.agent.sufficiency_check import is_sufficient
 from backend.app.agent.question_selection import (
     select_next_requirement,
@@ -281,7 +281,7 @@ def test_13_scenario_max_question_limit_does_not_silently_bypass():
     assert loc_req_after.value is None
 
     # Verify strategy directive logic recognizes unresolved location
-    from backend.app.models.marketing_strategy import MarketingStrategy
+    from backend.app.schemas.agent.marketing_strategy import MarketingStrategy
     mock_strategy = MarketingStrategy(
         business_overview=["Summary"],
         marketing_channels_and_tactics=["SEO", "Website"],

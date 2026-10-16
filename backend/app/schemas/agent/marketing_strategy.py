@@ -161,4 +161,3 @@ class MarketingStrategy(BaseModel):
                     coerced.append(item)
             return coerced
         return v
-

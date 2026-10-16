@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from backend.app.models.marketing_strategy import MarketingStrategy
+from backend.app.schemas.agent.marketing_strategy import MarketingStrategy
 
 
 def test_marketing_strategy_model():

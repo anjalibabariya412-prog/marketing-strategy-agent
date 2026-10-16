@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Firecrawl settings
     firecrawl_api_key: Optional[str] = None
 
+    # Tavily settings
+    tavily_api_key: Optional[str] = None
+
     # LLM Pricing settings (USD per 1M tokens)
     llm_input_price_per_1m: Optional[Decimal] = Decimal("0.10")
     llm_cached_input_price_per_1m: Optional[Decimal] = Decimal("0.01")

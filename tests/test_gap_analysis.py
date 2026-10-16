@@ -4,9 +4,9 @@ import sys
 # Ensure root directory is in python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.business_context import BusinessContext
-from backend.app.models.information_requirement import RequirementStatus
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.business_context import BusinessContext
+from backend.app.schemas.agent.information_requirement import RequirementStatus
 from backend.app.core.requirements_library import load_requirements_into_state
 from backend.app.agent.gap_analysis import analyze_relevance
 

@@ -4,7 +4,7 @@ from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import UUID
 
 from backend.app.db.base import Base
-from backend.app.db.orm.llm_usage import LLMUsage
+from backend.app.models.llm_usage import LLMUsage
 
 
 def test_llm_usage_model_registration():

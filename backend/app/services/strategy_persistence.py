@@ -3,9 +3,9 @@ import logging
 from typing import Any, Dict, Optional, Union
 import uuid
 
-from backend.app.db.orm.strategy import Strategy
+from backend.app.models.strategy import Strategy
 from backend.app.db.session import SessionLocal
-from backend.app.models.marketing_strategy import MarketingStrategy
+from backend.app.schemas.agent.marketing_strategy import MarketingStrategy
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ document, keeping them strictly separated from current business context.
 from typing import Optional
 from pydantic import BaseModel, Field
 
-from backend.app.schemas.pdf_extraction import PDFInsights
+from backend.app.schemas.agent.pdf_insights import PDFInsights
 
 
 class HistoricalDocumentContext(BaseModel):

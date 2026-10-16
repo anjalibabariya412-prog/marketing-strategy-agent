@@ -1,9 +1,9 @@
 import uuid
-from typing import Dict, Optional
+from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
-from backend.app.models.business_context import MarketingBudget
-from backend.app.models.marketing_strategy import MarketingStrategy
+from backend.app.schemas.agent.business_context import MarketingBudget
+from backend.app.schemas.agent.marketing_strategy import MarketingStrategy
 
 
 class StartRequest(BaseModel):
@@ -57,7 +57,6 @@ class StartRequest(BaseModel):
         description="UUID of the uploaded document in uploaded_documents table to associate with this strategy request."
     )
 
-
     @field_validator("company_name", "product_or_service", "marketing_goal", "target_audience", mode="before")
     @classmethod
     def strip_and_validate_required_str(cls, v: str) -> str:
@@ -83,8 +82,6 @@ class StartRequest(BaseModel):
             stripped = v.strip()
             return stripped if stripped else None
         return v
-
-
 
 
 class StartResponse(BaseModel):

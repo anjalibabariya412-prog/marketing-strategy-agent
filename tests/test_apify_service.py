@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from backend.app.models.parsed_url import ParsedURL
+from backend.app.schemas.agent.parsed_url import ParsedURL
 from backend.app.services.apify_service import scrape_single_parsed_url, scrape_parsed_urls
 
 

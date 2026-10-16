@@ -7,9 +7,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.business_context import BusinessContext, MarketingBudget
-from backend.app.models.marketing_strategy import MarketingStrategy
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.business_context import BusinessContext, MarketingBudget
+from backend.app.schemas.agent.marketing_strategy import MarketingStrategy
 from backend.app.core.requirements_library import load_requirements_into_state
 from backend.app.agent.strategy_generation import generate_strategy
 

@@ -20,6 +20,5 @@ app.add_middleware(
 app.include_router(conversation_router)
 app.include_router(pdf_extraction_router)
 app.include_router(revision_router, prefix="/api")
-app.include_router(revision_router)
 
 

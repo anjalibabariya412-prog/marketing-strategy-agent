@@ -20,3 +20,4 @@ SQLAlchemy
 alembic
 psycopg[binary]
 firecrawl-py
+tavily-python

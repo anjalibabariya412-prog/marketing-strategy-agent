@@ -908,7 +908,7 @@ function App() {
       const dynamicQuestion = extractDynamicQuestion(data.question);
       setBusinessSummaryText(summaryContent);
 
-      const staticIntroText = "Hi! Let's personalize your marketing strategy with a few quick questions based on your business and goals.";
+      const staticIntroText = "welcome! Let's personalize your marketing strategy with a few quick questions based on your business and goals.\n";
       const combinedInitialContent = `${staticIntroText}\n\n${dynamicQuestion}`;
 
       const combinedInitialMsg = {
@@ -1579,39 +1579,32 @@ function App() {
 
               {startError && <div className="error-banner">{startError}</div>}
 
-              <div className="form-actions">
-                <button
-                  type="submit"
-                  className={`btn-primary btn-start ${formSubmitting ? 'is-submitting' : ''}`}
-                  disabled={formSubmitting || fileUploading}
-                >
-                  {formSubmitting ? (
-                    <span className="btn-loading-content">
-                      <span className="btn-shimmer-sweep" aria-hidden="true" />
-                      <svg className="btn-circular-spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9" stroke="rgba(255, 255, 255, 0.35)" strokeWidth="2.5" />
-                        <path d="M12 3a9 9 0 0 1 9 9" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" />
-                      </svg>
-                      <span>Analyzing your business</span>
-                    </span>
-                  ) : (
-                    'Start →'
-                  )}
-                </button>
-              </div>
+              {!formSubmitting && (
+                <div className="form-actions">
+                  <button
+                    type="submit"
+                    className="btn-primary btn-start"
+                    disabled={fileUploading}
+                  >
+                    Start →
+                  </button>
+                </div>
+              )}
             </form>
 
             {formSubmitting && (
               <div className="start-progress-indicator" role="status" aria-live="polite">
-                <div className="start-progress-header">
+                <div className="start-progress-group">
                   <span className="start-progress-spinner" aria-hidden="true" />
-                  <span className="start-progress-message">
-                    {progressStatus?.message || 'Analyzing your business...'}
-                  </span>
+                  <div className="start-progress-text">
+                    <span className="start-progress-message">
+                      {progressStatus?.message || 'Analyzing your business...'}
+                    </span>
+                    {progressStatus?.detail && (
+                      <p className="start-progress-detail">{progressStatus.detail}</p>
+                    )}
+                  </div>
                 </div>
-                {progressStatus?.detail && (
-                  <p className="start-progress-detail">{progressStatus.detail}</p>
-                )}
               </div>
             )}
           </div>

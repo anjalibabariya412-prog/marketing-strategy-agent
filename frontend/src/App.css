@@ -2181,78 +2181,6 @@
   transition: all var(--transition-normal);
 }
 
-.btn-start.is-submitting,
-.btn-start.is-submitting:disabled {
-  min-width: 220px;
-  cursor: wait !important;
-  background-color: var(--color-primary) !important;
-  border-color: var(--color-primary) !important;
-  color: #ffffff !important;
-  opacity: 1 !important;
-  padding-left: 22px;
-  padding-right: 22px;
-  box-shadow: 0 4px 14px rgba(60, 71, 144, 0.35), 0 0 0 4px rgba(228, 233, 254, 0.6) !important;
-  animation: aiPulseGlow 2.2s infinite ease-in-out;
-}
-
-@keyframes aiPulseGlow {
-  0%, 100% {
-    box-shadow: 0 4px 14px rgba(60, 71, 144, 0.35), 0 0 0 4px rgba(228, 233, 254, 0.5);
-  }
-  50% {
-    box-shadow: 0 6px 20px rgba(60, 71, 144, 0.45), 0 0 0 8px rgba(228, 233, 254, 0.85);
-  }
-}
-
-.btn-loading-content {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  position: relative;
-  z-index: 2;
-  font-size: 15px;
-  font-weight: 600;
-  color: #ffffff !important;
-  letter-spacing: -0.01em;
-}
-
-.btn-circular-spinner {
-  width: 18px;
-  height: 18px;
-  animation: spinSmooth 0.8s linear infinite;
-  flex-shrink: 0;
-}
-
-.btn-shimmer-sweep {
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 70%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.08) 20%,
-    rgba(255, 255, 255, 0.35) 50%,
-    rgba(255, 255, 255, 0.08) 80%,
-    transparent 100%
-  );
-  transform: skewX(-20deg);
-  animation: shimmer-sweep 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  pointer-events: none;
-  z-index: 1;
-}
-
-@keyframes shimmer-sweep {
-  0% {
-    left: -100%;
-  }
-  100% {
-    left: 200%;
-  }
-}
-
 
 /* ==========================================
    Chatbot Conversation UI (Subtask 4 Polish)
@@ -2989,13 +2917,14 @@
    Dynamic Analysis Progress Indicator (Directly below start form)
    ========================================================================== */
 .start-progress-indicator {
-  margin-top: 18px;
-  padding: 10px 4px;
+  margin-top: 24px;
+  padding: 18px 4px 10px;
+  border-top: 1px solid var(--color-border-subtle);
   background: transparent;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: flex-start;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
   animation: fadeInProgress 0.25s ease-out;
 }
 
@@ -3010,6 +2939,7 @@
   }
 }
 
+.start-progress-group,
 .start-progress-header {
   display: inline-flex;
   align-items: center;
@@ -3027,6 +2957,13 @@
   flex-shrink: 0;
 }
 
+.start-progress-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
 .start-progress-message {
   font-size: 14px;
   font-weight: 600;
@@ -3035,7 +2972,7 @@
 }
 
 .start-progress-detail {
-  margin: 0 0 0 26px;
+  margin: 0;
   font-size: 13px;
   color: var(--color-text-muted, #64748b);
   line-height: 1.4;

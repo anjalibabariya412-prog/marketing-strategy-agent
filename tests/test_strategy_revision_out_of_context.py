@@ -11,11 +11,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from backend.app.main import app
 from backend.app.db.session import SessionLocal
-from backend.app.db.orm.strategy_request import StrategyRequest
-from backend.app.db.orm.business import Business
-from backend.app.db.orm.conversation import Conversation
-from backend.app.db.orm.strategy import Strategy
-from backend.app.schemas.revision import ProposedSectionChange, RevisionState
+from backend.app.models.strategy_request import StrategyRequest
+from backend.app.models.business import Business
+from backend.app.models.conversation import Conversation
+from backend.app.models.strategy import Strategy
+from backend.app.schemas.agent.revision_state import ProposedSectionChange, RevisionState
 from backend.app.services.revision_service import (
     format_out_of_context_response,
     save_revision_state,
@@ -89,7 +89,7 @@ def mock_strategy_session():
     }
 
     with SessionLocal() as db:
-        from backend.app.db.orm.revision_message import RevisionMessage
+        from backend.app.models.revision_message import RevisionMessage
         import uuid
         req_uuid = uuid.UUID(strat_req_id)
         db.query(RevisionMessage).filter(RevisionMessage.strategy_request_id == req_uuid).delete()

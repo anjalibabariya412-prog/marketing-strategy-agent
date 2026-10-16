@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
-from backend.app.models.parsed_url import ParsedURL
+from backend.app.schemas.agent.parsed_url import ParsedURL
 from backend.app.services.apify_service import (
     ACTOR_MAPPING,
     scrape_single_parsed_url,

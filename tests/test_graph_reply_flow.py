@@ -11,9 +11,9 @@ if hasattr(sys.stdout, "reconfigure"):
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.information_requirement import RequirementStatus
-from backend.app.models.business_context import BusinessContext
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.information_requirement import RequirementStatus
+from backend.app.schemas.agent.business_context import BusinessContext
 from backend.app.core.requirements_library import load_requirements_into_state
 from backend.app.agent.graph import graph, ask_node
 

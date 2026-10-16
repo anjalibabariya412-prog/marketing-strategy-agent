@@ -9,9 +9,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from backend.app.models.business_context import BusinessContext
-from backend.app.models.online_presence import OnlinePresenceContext, OnlineSourceSummary
-from backend.app.models.scraped_result import ApifyScrapeResult
+from backend.app.schemas.agent.business_context import BusinessContext
+from backend.app.schemas.agent.online_presence import OnlinePresenceContext, OnlineSourceSummary
+from backend.app.schemas.agent.scraped_result import ApifyScrapeResult
 from backend.app.services.online_presence_processor import process_online_presence
 
 

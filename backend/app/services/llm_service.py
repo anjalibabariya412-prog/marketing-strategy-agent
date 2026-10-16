@@ -198,8 +198,8 @@ def _persist_llm_usage(
                 logger.warning("Invalid conversation_id UUID format: %s", conversation_id)
 
         from backend.app.db.session import SessionLocal
-        from backend.app.db.orm.llm_usage import LLMUsage
-        from backend.app.db.orm.conversation import Conversation
+        from backend.app.models.llm_usage import LLMUsage
+        from backend.app.models.conversation import Conversation
 
         with SessionLocal() as db:
             # If conversation_id is known but strategy_request_id is not,

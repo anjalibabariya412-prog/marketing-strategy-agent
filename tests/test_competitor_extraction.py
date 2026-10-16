@@ -8,9 +8,9 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 from backend.app.core.requirements_library import load_requirements_into_state
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.business_context import BusinessContext
-from backend.app.models.information_requirement import RequirementStatus
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.business_context import BusinessContext
+from backend.app.schemas.agent.information_requirement import RequirementStatus
 from backend.app.agent.answer_processing import (
     extract_competitors,
     update_state_competitors,
@@ -107,13 +107,15 @@ def test_6_answering_competitor_question_does_not_trigger_web_research():
     with patch("backend.app.agent.answer_processing.get_llm_response", side_effect=mock_llm_side_effect):
         process_answer_for_requirement(state, "Brand A and Brand B")
 
-    # Run analyze node to ensure graph execution passes without web research
-    updated_state = analyze_node(state)
+    # Run analyze node with patched message generation and gap analysis
+    with patch("backend.app.agent.graph.analyze_relevance", return_value=True), \
+         patch("backend.app.agent.graph.generate_first_contextual_message"):
+        updated_state = analyze_node(state)
 
-    # Verify state stores competitors and no web research is present or called
+    # Verify state stores competitors and analyze node triggers no web research
     assert updated_state.business_context.competitors == ["Brand A", "Brand B"]
-    assert not hasattr(updated_state, "competitor_research")
-    print("✓ TEST 6 PASSED: Answering competitor question stores user competitors and triggers NO web research.")
+    assert updated_state.competitor_research is None
+    print("✓ TEST 6 PASSED: Answering competitor question stores user competitors and analyze_node triggers NO web research.")
 
 
 def run_all_tests():

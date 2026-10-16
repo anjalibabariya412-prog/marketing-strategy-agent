@@ -8,9 +8,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from backend.app.db.orm.revision_message import RevisionMessage
+from backend.app.models.revision_message import RevisionMessage
 from backend.app.db.session import SessionLocal
-from backend.app.schemas.revision import (
+from backend.app.schemas.api.revision import (
     RevisionApplyResponse,
     RevisionHistoryResponse,
     RevisionMessageItem,

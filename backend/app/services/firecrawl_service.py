@@ -7,8 +7,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from firecrawl import Firecrawl
 
 from backend.app.core.config import settings
-from backend.app.models.parsed_url import ParsedURL
-from backend.app.models.scraped_result import ApifyScrapeResult
+from backend.app.schemas.agent.parsed_url import ParsedURL
+from backend.app.schemas.agent.scraped_result import ApifyScrapeResult
 
 logger = logging.getLogger(__name__)
 

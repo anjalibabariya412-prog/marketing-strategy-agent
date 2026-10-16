@@ -5,13 +5,14 @@ from psycopg_pool import ConnectionPool
 from langgraph.types import interrupt
 
 from backend.app.core.config import settings
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.information_requirement import RequirementStatus
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.information_requirement import RequirementStatus
 from backend.app.agent.gap_analysis import analyze_relevance
 from backend.app.agent.question_selection import prepare_next_question, generate_first_contextual_message
 from backend.app.agent.answer_processing import process_answer_for_requirement, process_answer_and_plan_next
 from backend.app.agent.sufficiency_check import is_sufficient
 from backend.app.agent.strategy_generation import generate_strategy
+from backend.app.services.tavily_research_service import conduct_competitor_research
 from backend.app.core.progress_notifier import emit_progress
 
 logger = logging.getLogger(__name__)
@@ -133,15 +134,44 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
     return state
 
 
+def competitor_research_node(state: MarketingAgentState) -> MarketingAgentState:
+    """
+    Graph Node: Researches identifiable competitors using Tavily and analyzes
+    findings using the centralized LLM service.
+    Runs when competitors are present and unresearched.
+    Safe and non-blocking: errors or empty results never halt the workflow.
+    """
+    logger.info("Graph Node [competitor_research]: Checking for unresearched competitors")
+    try:
+        latest_answer = None
+        if state.qa_history:
+            for turn in reversed(state.qa_history):
+                if turn.requirement_id in ("competitive_landscape", "competitors") or "competitor" in str(turn.requirement_id or "").lower():
+                    latest_answer = turn.answer
+                    break
+        conduct_competitor_research(state, latest_user_answer=latest_answer)
+    except Exception as e:
+        logger.error(f"competitor_research_node encountered unexpected error: {e}")
+    return state
+
+
 def generate_node(state: MarketingAgentState) -> MarketingAgentState:
     """
-    Graph Node: Synthesizes business context and known facts to generate the final MarketingStrategy,
+    Graph Node: Synthesizes business context, known facts, and competitor research to generate the final MarketingStrategy,
     storing the output in state.final_strategy.
     """
     logger.info("Graph Node [generate]: Running generate_strategy()")
     emit_progress("Preparing your marketing strategy...", "Generating tailored marketing recommendations.")
     state.pending_question = None
     state.pending_requirement_id = None
+
+    # Ensure any unresearched competitors are researched prior to strategy generation
+    if state.business_context.competitors:
+        try:
+            conduct_competitor_research(state)
+        except Exception as e:
+            logger.error(f"Pre-generation competitor research failed: {e}")
+
     strategy = generate_strategy(state)
     state.final_strategy = strategy
     state.is_sufficient = True
@@ -154,6 +184,7 @@ builder = StateGraph(MarketingAgentState)
 # Add real nodes
 builder.add_node("analyze", analyze_node)
 builder.add_node("ask", ask_node)
+builder.add_node("competitor_research", competitor_research_node)
 builder.add_node("generate", generate_node)
 
 # Entry point: START -> analyze
@@ -169,8 +200,10 @@ builder.add_conditional_edges(
     }
 )
 
-# Loop back from ask to analyze to re-evaluate after user answer
-builder.add_edge("ask", "analyze")
+# After ask: route to competitor_research to research newly identified competitors,
+# then loop back to analyze to re-evaluate sufficiency and plan next steps
+builder.add_edge("ask", "competitor_research")
+builder.add_edge("competitor_research", "analyze")
 builder.add_edge("generate", END)
 
 # Postgres checkpointer for persistent session state across interrupts and server restarts

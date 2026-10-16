@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from fastapi.testclient import TestClient
 from backend.app.main import app
-from backend.app.models.business_context import BusinessContext, MarketingBudget, CurrencyEnum
-from backend.app.schemas.conversation import StartRequest
+from backend.app.schemas.agent.business_context import BusinessContext, MarketingBudget, CurrencyEnum
+from backend.app.schemas.api.conversation import StartRequest
 
 client = TestClient(app)
 

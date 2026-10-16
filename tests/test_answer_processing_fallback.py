@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.information_requirement import InformationRequirement, RequirementStatus
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.information_requirement import InformationRequirement, RequirementStatus
 from backend.app.agent.answer_processing import (
     process_answer_for_requirement,
     process_answer_and_plan_next,

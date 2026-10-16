@@ -3,9 +3,9 @@ import logging
 from typing import List, Optional
 import uuid
 
-from backend.app.db.orm.information_requirement import InformationRequirement as InformationRequirementORM
+from backend.app.models.information_requirement import InformationRequirement as InformationRequirementORM
 from backend.app.db.session import SessionLocal
-from backend.app.models.information_requirement import (
+from backend.app.schemas.agent.information_requirement import (
     InformationRequirement as InformationRequirementModel,
     RequirementStatus,
 )

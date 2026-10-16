@@ -1,11 +1,12 @@
-from .conversation import (
+from backend.app.schemas.api.conversation import (
     StartRequest,
     StartResponse,
     ReplyRequest,
     ReplyResponse,
-    StrategyResponse
+    StrategyResponse,
 )
-from .pdf_extraction import PDFExtractionResponse, PDFInsights
+from backend.app.schemas.api.pdf_extraction import PDFExtractionResponse
+from backend.app.schemas.agent.pdf_insights import PDFInsights
 
 __all__ = [
     "StartRequest",
@@ -14,6 +15,5 @@ __all__ = [
     "ReplyResponse",
     "StrategyResponse",
     "PDFExtractionResponse",
-    "PDFInsights"
+    "PDFInsights",
 ]
-

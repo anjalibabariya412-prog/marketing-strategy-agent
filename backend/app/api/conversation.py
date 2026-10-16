@@ -14,13 +14,13 @@ from backend.app.core.progress_notifier import (
     reset_progress_notifier,
 )
 
-from backend.app.models.agent_state import MarketingAgentState
-from backend.app.models.business_context import BusinessContext
-from backend.app.models.document_context import HistoricalDocumentContext
-from backend.app.schemas.pdf_extraction import PDFInsights
+from backend.app.schemas.agent.agent_state import MarketingAgentState
+from backend.app.schemas.agent.business_context import BusinessContext
+from backend.app.schemas.agent.document_context import HistoricalDocumentContext
+from backend.app.schemas.agent.pdf_insights import PDFInsights
 from backend.app.core.requirements_library import load_requirements_into_state
 from backend.app.agent.graph import graph
-from backend.app.schemas.conversation import (
+from backend.app.schemas.api.conversation import (
     StartRequest,
     StartResponse,
     ReplyRequest,
@@ -37,12 +37,12 @@ from backend.app.services.requirement_persistence import save_information_requir
 from backend.app.services.chat_message_persistence import save_chat_message
 from backend.app.services.strategy_persistence import save_strategy
 from backend.app.db.session import SessionLocal
-from backend.app.db.orm.strategy import Strategy
-from backend.app.db.orm.strategy_request import StrategyRequest
-from backend.app.db.orm.business import Business
-from backend.app.db.orm.conversation import Conversation
-from backend.app.db.orm.uploaded_document import UploadedDocument
-from backend.app.models.marketing_strategy import MarketingStrategy
+from backend.app.models.strategy import Strategy
+from backend.app.models.strategy_request import StrategyRequest
+from backend.app.models.business import Business
+from backend.app.models.conversation import Conversation
+from backend.app.models.uploaded_document import UploadedDocument
+from backend.app.schemas.agent.marketing_strategy import MarketingStrategy
 
 logger = logging.getLogger(__name__)
 

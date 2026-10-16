@@ -10,10 +10,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app.models.parsed_url import ParsedURL
-from backend.app.models.scraped_result import ApifyScrapeResult
+from backend.app.schemas.agent.parsed_url import ParsedURL
+from backend.app.schemas.agent.scraped_result import ApifyScrapeResult
 from backend.app.db.session import SessionLocal
-from backend.app.db.orm.uploaded_document import UploadedDocument
+from backend.app.models.uploaded_document import UploadedDocument
 from backend.app.services.apify_service import scrape_parsed_urls
 from backend.app.core.progress_notifier import set_progress_notifier, reset_progress_notifier
 

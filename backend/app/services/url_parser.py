@@ -2,7 +2,7 @@ import re
 from typing import List, Optional
 from urllib.parse import urlparse, urlunparse
 
-from backend.app.models.parsed_url import ParsedURL
+from backend.app.schemas.agent.parsed_url import ParsedURL
 
 
 # Regex for basic domain/hostname sanity check

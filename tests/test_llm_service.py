@@ -11,7 +11,7 @@ from backend.app.services.llm_service import (
     calculate_llm_costs,
     LLMServiceError,
 )
-from backend.app.db.orm.llm_usage import LLMUsage
+from backend.app.models.llm_usage import LLMUsage
 
 
 def test_extract_usage_metadata_with_object():
