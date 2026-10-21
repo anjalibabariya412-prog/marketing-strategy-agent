@@ -101,6 +101,10 @@ class CompetitorResearchReport(BaseModel):
         default_factory=list,
         description="List of normalized lowercase competitor names already researched to prevent duplicates."
     )
+    discovery_attempted: bool = Field(
+        default=False,
+        description="Whether automatic competitor discovery search was already executed."
+    )
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO timestamp when the research report was created."

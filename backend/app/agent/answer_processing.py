@@ -14,7 +14,10 @@ from backend.app.schemas.agent.document_context import format_document_context
 from backend.app.schemas.agent.online_presence import format_online_presence_context
 from backend.app.schemas.agent.qa_turn import QATurn
 from backend.app.services.llm_service import get_llm_response, LLMServiceError
-from backend.app.services.tavily_research_service import classify_competitor_response
+from backend.app.services.tavily_research_service import (
+    classify_competitor_response,
+    update_state_competitors as tavily_update_state_competitors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +79,9 @@ def extract_competitors(user_answer: str, conversation_id: Optional[str] = None)
 def update_state_competitors(state: MarketingAgentState, competitor_list: List[str]) -> None:
     """
     Appends new non-duplicate competitor names to state.business_context.competitors.
+    Delegates to tavily_research_service to ensure own-brand and generic-substitute exclusion.
     """
-    if not competitor_list:
-        return
-
-    existing_set = {c.lower() for c in state.business_context.competitors}
-    for comp in competitor_list:
-        if comp and comp.strip():
-            clean = comp.strip()
-            if clean.lower() not in existing_set:
-                existing_set.add(clean.lower())
-                state.business_context.competitors.append(clean)
+    tavily_update_state_competitors(state, competitor_list)
 
 
 def extract_initial_context(user_message: str) -> BusinessContext:
@@ -206,6 +201,17 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
             if req:
                 req.status = RequirementStatus.KNOWN
                 req.value = user_answer.strip()
+        else:
+            # If user mentioned competitors or competitor URLs in this answer, extract them
+            lower_ans = user_answer.lower()
+            competitor_indicators = (
+                "competitor", "compete", "rival", "alternative", "versus", " vs ", "vs.",
+                "better than", "cheaper than", "compared to", "http://", "https://", ".com", ".in", ".co", ".org"
+            )
+            if any(ind in lower_ans for ind in competitor_indicators):
+                comps = extract_competitors(user_answer, conversation_id=state.thread_id)
+                if comps:
+                    update_state_competitors(state, comps)
 
         # 2. Process INCIDENTALLY KNOWN requirements
         incidentals = data.get("incidentally_known_requirements", [])
@@ -415,6 +421,17 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
             if req:
                 req.status = RequirementStatus.KNOWN
                 req.value = user_answer.strip()
+        else:
+            # If user mentioned competitors or competitor URLs in this answer, extract them
+            lower_ans = user_answer.lower()
+            competitor_indicators = (
+                "competitor", "compete", "rival", "alternative", "versus", " vs ", "vs.",
+                "better than", "cheaper than", "compared to", "http://", "https://", ".com", ".in", ".co", ".org"
+            )
+            if any(ind in lower_ans for ind in competitor_indicators):
+                comps = extract_competitors(user_answer, conversation_id=state.thread_id)
+                if comps:
+                    update_state_competitors(state, comps)
 
         # Process incidental requirements
         incidental_ids = []

@@ -47,13 +47,13 @@ def analyze_node(state: MarketingAgentState) -> MarketingAgentState:
 def route_after_analyze(state: MarketingAgentState) -> str:
     """
     Conditional Edge Router: Evaluates if sufficient information has been collected.
-    Returns 'generate' if is_sufficient(state) is True, otherwise returns 'ask'.
+    Returns 'competitor_research' if is_sufficient(state) is True, otherwise returns 'ask'.
     """
     sufficient = is_sufficient(state)
     state.is_sufficient = sufficient
     if sufficient:
-        logger.info("Graph Router [route_after_analyze]: Sufficiency reached -> Routing to 'generate'")
-        return "generate"
+        logger.info("Graph Router [route_after_analyze]: Sufficiency reached -> Routing to 'competitor_research'")
+        return "competitor_research"
 
     logger.info("Graph Router [route_after_analyze]: Insufficient information -> Routing to 'ask'")
     return "ask"
@@ -165,8 +165,8 @@ def generate_node(state: MarketingAgentState) -> MarketingAgentState:
     state.pending_question = None
     state.pending_requirement_id = None
 
-    # Ensure any unresearched competitors are researched prior to strategy generation
-    if state.business_context.competitors:
+    # Ensure competitor research has run prior to strategy generation (safeguard)
+    if not state.competitor_research:
         try:
             conduct_competitor_research(state)
         except Exception as e:
@@ -190,20 +190,19 @@ builder.add_node("generate", generate_node)
 # Entry point: START -> analyze
 builder.add_edge(START, "analyze")
 
-# Conditional Edge: analyze -> route_after_analyze -> ask OR generate
+# Conditional Edge: analyze -> route_after_analyze -> ask OR competitor_research
 builder.add_conditional_edges(
     "analyze",
     route_after_analyze,
     {
         "ask": "ask",
-        "generate": "generate"
+        "competitor_research": "competitor_research"
     }
 )
 
-# After ask: route to competitor_research to research newly identified competitors,
-# then loop back to analyze to re-evaluate sufficiency and plan next steps
-builder.add_edge("ask", "competitor_research")
-builder.add_edge("competitor_research", "analyze")
+# After ask: loop back to analyze to re-evaluate sufficiency
+builder.add_edge("ask", "analyze")
+builder.add_edge("competitor_research", "generate")
 builder.add_edge("generate", END)
 
 # Postgres checkpointer for persistent session state across interrupts and server restarts
