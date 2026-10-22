@@ -1,5 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 import logging
+import re
 import time
 import uuid
 from typing import Optional, Union
@@ -31,6 +32,30 @@ def _clean_json_string(text: str) -> str:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     return text
+
+
+def _sanitize_error_message(error: Union[Exception, str, None]) -> str:
+    """
+    Safely sanitizes error messages by scrubbing potential API keys, authorization headers,
+    bearer tokens, and sensitive details while retaining the error category and safe description.
+    Truncates to 500 characters max.
+    """
+    if error is None:
+        return "Unknown error"
+
+    msg = str(error)
+    # Mask potential OpenAI or other API keys (e.g. sk-...)
+    msg = re.sub(r"sk-[a-zA-Z0-9_\-]{8,}", "sk-***REDACTED***", msg)
+    # Mask Bearer tokens
+    msg = re.sub(r"(?i)bearer\s+[a-zA-Z0-9_\-\.]{8,}", "Bearer ***REDACTED***", msg)
+    # Mask basic authorization headers / tokens
+    msg = re.sub(r"(?i)(authorization|api[-_]?key|token)\s*[:=]\s*['\"]?[a-zA-Z0-9_\-\.]+['\"]?", r"\1: ***REDACTED***", msg)
+
+    err_type = type(error).__name__ if isinstance(error, Exception) else "Error"
+    if err_type not in msg:
+        msg = f"{err_type}: {msg}"
+
+    return msg.strip()[:500]
 
 
 def _extract_usage_metadata(response, fallback_model: str = None) -> dict:
@@ -177,73 +202,148 @@ def _persist_llm_usage(
     duration_ms: Optional[int] = None,
     strategy_request_id: Optional[Union[uuid.UUID, str]] = None,
     conversation_id: Optional[Union[uuid.UUID, str]] = None,
+    status: str = "success",
+    attempt_number: int = 1,
+    error_message: Optional[str] = None,
+    record_id: Optional[uuid.UUID] = None,
+    max_db_retries: int = 2,
 ) -> Optional[uuid.UUID]:
     """
     Persists one row to the llm_usage table using SessionLocal.
-    Catches and logs any database error so LLM invocation never fails due to tracking errors.
+    Catches and logs any database error with structured context so LLM invocation
+    never fails due to tracking errors. Includes bounded retry with idempotency for transient database errors.
     """
-    try:
-        strat_uuid = None
-        if strategy_request_id:
-            try:
-                strat_uuid = uuid.UUID(str(strategy_request_id))
-            except (ValueError, TypeError):
-                logger.warning("Invalid strategy_request_id UUID format: %s", strategy_request_id)
+    strat_uuid = None
+    if strategy_request_id:
+        try:
+            strat_uuid = uuid.UUID(str(strategy_request_id))
+        except (ValueError, TypeError):
+            logger.warning("Invalid strategy_request_id UUID format: %s", strategy_request_id)
 
-        conv_uuid = None
-        if conversation_id:
-            try:
-                conv_uuid = uuid.UUID(str(conversation_id))
-            except (ValueError, TypeError):
-                logger.warning("Invalid conversation_id UUID format: %s", conversation_id)
+    conv_uuid = None
+    if conversation_id:
+        try:
+            conv_uuid = uuid.UUID(str(conversation_id))
+        except (ValueError, TypeError):
+            logger.warning("Invalid conversation_id UUID format: %s", conversation_id)
 
-        from backend.app.db.session import SessionLocal
-        from backend.app.models.llm_usage import LLMUsage
-        from backend.app.models.conversation import Conversation
+    target_record_id = record_id or uuid.uuid4()
 
-        with SessionLocal() as db:
-            # If conversation_id is known but strategy_request_id is not,
-            # resolve strategy_request_id from the conversation record if it exists
-            if conv_uuid and not strat_uuid:
+    cached_input = usage_info.get("cached_tokens")
+    if cached_input is None:
+        cached_input = usage_info.get("cached_input_tokens")
+
+    cache_write = usage_info.get("cache_write_tokens")
+    costs = calculate_llm_costs(usage_info)
+
+    from backend.app.db.session import SessionLocal
+    from backend.app.models.llm_usage import LLMUsage
+    from backend.app.models.conversation import Conversation
+
+    last_error = None
+    sanitized_err_msg = _sanitize_error_message(error_message) if error_message else None
+
+    for db_attempt in range(1, max_db_retries + 2):
+        try:
+            with SessionLocal() as db:
                 try:
-                    conv_rec = db.query(Conversation).filter(Conversation.id == conv_uuid).first()
-                    if conv_rec and conv_rec.strategy_request_id:
-                        strat_uuid = conv_rec.strategy_request_id
-                except Exception as lookup_err:
-                    logger.debug("Could not lookup strategy_request_id from conversation: %s", lookup_err)
+                    # If conversation_id is known but strategy_request_id is not,
+                    # resolve strategy_request_id from the conversation record if it exists
+                    if conv_uuid and not strat_uuid:
+                        try:
+                            conv_rec = db.query(Conversation).filter(Conversation.id == conv_uuid).first()
+                            if conv_rec and getattr(conv_rec, "strategy_request_id", None):
+                                resolved_strat = conv_rec.strategy_request_id
+                                if isinstance(resolved_strat, uuid.UUID):
+                                    strat_uuid = resolved_strat
+                                elif isinstance(resolved_strat, str):
+                                    strat_uuid = uuid.UUID(resolved_strat)
+                        except Exception as lookup_err:
+                            logger.debug("Could not lookup strategy_request_id from conversation: %s", lookup_err)
 
-            cached_input = usage_info.get("cached_tokens")
-            if cached_input is None:
-                cached_input = usage_info.get("cached_input_tokens")
+                    # If strategy_request_id is known but conversation_id is not,
+                    # resolve conversation_id from the conversation record linked 1-to-1 if it exists
+                    if strat_uuid and not conv_uuid:
+                        try:
+                            conv_rec = db.query(Conversation).filter(Conversation.strategy_request_id == strat_uuid).first()
+                            if conv_rec and getattr(conv_rec, "id", None):
+                                resolved_conv = conv_rec.id
+                                if isinstance(resolved_conv, uuid.UUID):
+                                    conv_uuid = resolved_conv
+                                elif isinstance(resolved_conv, str):
+                                    conv_uuid = uuid.UUID(resolved_conv)
+                        except Exception as lookup_err:
+                            logger.debug("Could not lookup conversation_id from strategy_request: %s", lookup_err)
 
-            cache_write = usage_info.get("cache_write_tokens")
-            costs = calculate_llm_costs(usage_info)
+                    # Idempotency check: on retry (db_attempt > 1) or when record_id is explicitly provided,
+                    # verify if record with target_record_id was already persisted by a previous attempt
+                    if (db_attempt > 1 or record_id is not None):
+                        try:
+                            existing = db.query(LLMUsage).filter(LLMUsage.id == target_record_id).first()
+                            if existing:
+                                logger.info("LLM usage record %s already persisted (idempotent write)", target_record_id)
+                                return existing.id
+                        except Exception:
+                            pass
 
-            usage_record = LLMUsage(
-                strategy_request_id=strat_uuid,
-                conversation_id=conv_uuid,
-                operation=operation,
-                provider=provider,
-                model=model,
-                input_tokens=usage_info.get("prompt_tokens"),
-                cached_input_tokens=cached_input,
-                cache_write_tokens=cache_write,
-                output_tokens=usage_info.get("completion_tokens"),
-                duration_ms=duration_ms,
-                input_cost=costs.get("input_cost"),
-                cached_input_cost=costs.get("cached_input_cost"),
-                cache_write_cost=costs.get("cache_write_cost"),
-                output_cost=costs.get("output_cost"),
-                total_cost=costs.get("total_cost"),
+                    usage_record = LLMUsage(
+                        id=target_record_id,
+                        strategy_request_id=strat_uuid,
+                        conversation_id=conv_uuid,
+                        operation=operation,
+                        provider=provider,
+                        model=model,
+                        status=status,
+                        attempt_number=attempt_number,
+                        error_message=sanitized_err_msg,
+                        input_tokens=usage_info.get("prompt_tokens"),
+                        cached_input_tokens=cached_input,
+                        cache_write_tokens=cache_write,
+                        output_tokens=usage_info.get("completion_tokens"),
+                        duration_ms=duration_ms,
+                        input_cost=costs.get("input_cost"),
+                        cached_input_cost=costs.get("cached_input_cost"),
+                        cache_write_cost=costs.get("cache_write_cost"),
+                        output_cost=costs.get("output_cost"),
+                        total_cost=costs.get("total_cost"),
+                    )
+                    db.add(usage_record)
+                    db.commit()
+                    return usage_record.id
+                except Exception:
+                    db.rollback()
+                    raise
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "Transient DB write failure on attempt %d/%d for LLM usage [record_id=%s, op=%s, model=%s]: %s",
+                db_attempt,
+                max_db_retries + 1,
+                target_record_id,
+                operation,
+                model,
+                e,
             )
-            db.add(usage_record)
-            db.commit()
-            db.refresh(usage_record)
-            return usage_record.id
+            if db_attempt < max_db_retries + 1:
+                time.sleep(0.05 * db_attempt)
 
-    except Exception as e:
-        logger.error("Failed to persist LLM usage record to database: %s", e)
-        return None
+    # Observable structured error log on unrecoverable persistence failure
+    sanitized_db_err = _sanitize_error_message(last_error)
+    logger.error(
+        "Failed to persist LLM usage record to database [record_id=%s, op=%s, model=%s, provider=%s, "
+        "status=%s, attempt_number=%s, strategy_request_id=%s, conversation_id=%s, error_category=%s]: %s",
+        target_record_id,
+        operation,
+        model,
+        provider,
+        status,
+        attempt_number,
+        strat_uuid,
+        conv_uuid,
+        type(last_error).__name__ if last_error else "UnknownError",
+        sanitized_db_err,
+    )
+    return None
 
 
 def get_llm_response(
@@ -258,10 +358,12 @@ def get_llm_response(
     strategy_request_id: Union[uuid.UUID, str] = None,
     conversation_id: Union[uuid.UUID, str] = None,
     provider: str = "openai",
+    max_retries: Optional[int] = None,
 ) -> str:
     """
     Sends a prompt or message list to OpenAI LLM, logs and persists usage to the database, and returns the response text.
     Preserves existing return type (str) and behavior for all callers.
+    Tracks each attempt (successful and failed retries) in the llm_usage table.
     """
     target_model = model or settings.openai_model
     client = OpenAI(api_key=settings.openai_api_key)
@@ -286,66 +388,119 @@ def get_llm_response(
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
-    try:
-        logger.info(f"Calling LLM ({target_model}) [operation={operation}]")
+    retry_count = max_retries if max_retries is not None else getattr(settings, "llm_max_retries", 0)
+    total_attempts = max(1, 1 + retry_count)
+
+    for attempt in range(1, total_attempts + 1):
         start_time = time.perf_counter()
-        response = client.chat.completions.create(**kwargs)
-        duration_ms = int((time.perf_counter() - start_time) * 1000)
-
-        choice = response.choices[0]
-        content = choice.message.content
-
-        logger.info(
-            "LLM response finish_reason=%s | content_length=%s | duration_ms=%s",
-            choice.finish_reason,
-            len(content or ""),
-            duration_ms,
-        )
-
-        usage_info = _extract_usage_metadata(response, fallback_model=target_model)
-        if (
-            usage_info["prompt_tokens"] is not None
-            and usage_info["completion_tokens"] is not None
-            and usage_info["total_tokens"] is not None
-        ):
-            cw_part = ""
-            if usage_info.get("cache_write_tokens") is not None:
-                cw_part = f", cache_write={usage_info['cache_write_tokens']}"
-            logger.info(
-                "LLM token usage: model=%s | prompt_tokens=%s (cached=%s%s) | completion_tokens=%s | total_tokens=%s | duration_ms=%s",
-                usage_info["model"],
-                usage_info["prompt_tokens"],
-                usage_info.get("cached_tokens"),
-                cw_part,
-                usage_info["completion_tokens"],
-                usage_info["total_tokens"],
-                duration_ms,
-            )
-        else:
-            logger.info(
-                "LLM token usage: model=%s | prompt_tokens=%s | completion_tokens=%s | total_tokens=%s (usage metadata unavailable)",
-                usage_info["model"],
-                usage_info["prompt_tokens"],
-                usage_info["completion_tokens"],
-                usage_info["total_tokens"],
-            )
-
-        # Persist usage to database without failing the LLM response if DB write fails
         try:
-            _persist_llm_usage(
-                operation=operation,
-                model=usage_info["model"],
-                provider=provider,
-                usage_info=usage_info,
-                duration_ms=duration_ms,
-                strategy_request_id=strategy_request_id,
-                conversation_id=conversation_id,
+            logger.info(f"Calling LLM ({target_model}) [operation={operation}, attempt={attempt}/{total_attempts}]")
+            response = client.chat.completions.create(**kwargs)
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+
+            choice = response.choices[0]
+            content = choice.message.content
+
+            logger.info(
+                "LLM response finish_reason=%s | content_length=%s | duration_ms=%s | attempt=%s",
+                choice.finish_reason,
+                len(content or ""),
+                duration_ms,
+                attempt,
             )
-        except Exception as persist_err:
-            logger.error("Failed to persist LLM usage record to database: %s", persist_err)
 
-        return _clean_json_string(content)
+            usage_info = _extract_usage_metadata(response, fallback_model=target_model)
+            if (
+                usage_info["prompt_tokens"] is not None
+                and usage_info["completion_tokens"] is not None
+                and usage_info["total_tokens"] is not None
+            ):
+                cw_part = ""
+                if usage_info.get("cache_write_tokens") is not None:
+                    cw_part = f", cache_write={usage_info['cache_write_tokens']}"
+                logger.info(
+                    "LLM token usage: model=%s | prompt_tokens=%s (cached=%s%s) | completion_tokens=%s | total_tokens=%s | duration_ms=%s",
+                    usage_info["model"],
+                    usage_info["prompt_tokens"],
+                    usage_info.get("cached_tokens"),
+                    cw_part,
+                    usage_info["completion_tokens"],
+                    usage_info["total_tokens"],
+                    duration_ms,
+                )
+            else:
+                logger.info(
+                    "LLM token usage: model=%s | prompt_tokens=%s | completion_tokens=%s | total_tokens=%s (usage metadata unavailable)",
+                    usage_info["model"],
+                    usage_info["prompt_tokens"],
+                    usage_info["completion_tokens"],
+                    usage_info["total_tokens"],
+                )
 
-    except Exception as e:
-        logger.error(f"OpenAI API request failed: {e}")
-        raise LLMServiceError(f"Failed to get response from LLM: {e}") from e
+            # Persist usage to database without failing the LLM response if DB write fails
+            try:
+                _persist_llm_usage(
+                    operation=operation,
+                    model=usage_info["model"],
+                    provider=provider,
+                    usage_info=usage_info,
+                    duration_ms=duration_ms,
+                    strategy_request_id=strategy_request_id,
+                    conversation_id=conversation_id,
+                    status="success",
+                    attempt_number=attempt,
+                    error_message=None,
+                )
+            except Exception as persist_err:
+                logger.error("Failed to persist LLM usage record to database: %s", persist_err)
+
+            return _clean_json_string(content)
+
+        except Exception as e:
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            sanitized_err = _sanitize_error_message(e)
+
+            # Extract usage metadata if present on the exception response; do not invent tokens
+            failed_usage = {
+                "prompt_tokens": None,
+                "cached_tokens": None,
+                "cache_write_tokens": None,
+                "completion_tokens": None,
+                "total_tokens": None,
+            }
+            if hasattr(e, "response"):
+                try:
+                    failed_usage = _extract_usage_metadata(getattr(e, "response"), fallback_model=target_model)
+                except Exception:
+                    pass
+
+            # Persist failed attempt record; does not raise if DB write fails
+            try:
+                _persist_llm_usage(
+                    operation=operation,
+                    model=target_model,
+                    provider=provider,
+                    usage_info=failed_usage,
+                    duration_ms=duration_ms,
+                    strategy_request_id=strategy_request_id,
+                    conversation_id=conversation_id,
+                    status="failed",
+                    attempt_number=attempt,
+                    error_message=sanitized_err,
+                )
+            except Exception as persist_err:
+                logger.error("Failed to persist LLM failure record to database: %s", persist_err)
+
+            if attempt < total_attempts:
+                logger.warning(
+                    "LLM attempt %d/%d failed: %s. Retrying...",
+                    attempt,
+                    total_attempts,
+                    sanitized_err,
+                )
+                time.sleep(0.1)
+                continue
+
+            logger.error("OpenAI API request failed: %s", e)
+            raise LLMServiceError(f"Failed to get response from LLM: {e}") from e
+

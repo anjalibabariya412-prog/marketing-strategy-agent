@@ -293,12 +293,14 @@ def generate_strategy(state: MarketingAgentState) -> MarketingStrategy:
     user_prompt = build_strategy_generation_prompt(state)
 
     try:
+        strat_id = state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None)
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=SYSTEM_PROMPT,
             response_format={"type": "json_object"},
             operation="strategy_generation",
             conversation_id=state.thread_id,
+            strategy_request_id=strat_id,
         )
 
         data = json.loads(raw_response)

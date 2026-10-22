@@ -2,10 +2,10 @@ import io
 import json
 import logging
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple, Union
 import uuid
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 import pdfplumber
 
 from backend.app.models.uploaded_document import UploadedDocument
@@ -138,13 +138,48 @@ def extract_and_clean_pdf(pdf_stream: io.BytesIO) -> Tuple[str, int, int]:
 
 
 @router.post("/extract-pdf-text", response_model=PDFExtractionResponse, status_code=status.HTTP_200_OK)
-async def extract_pdf_text(file: UploadFile = File(...)):
+async def extract_pdf_text(
+    request: Request,
+    file: UploadFile = File(...),
+    strategy_request_id: Optional[str] = Form(None),
+    conversation_id: Optional[str] = Form(None),
+):
     """
     Extracts text and tables from an uploaded PDF file and performs a single LLM call
     to determine marketing relevance and extract structured historical marketing insights.
+    Associates LLM usage and uploaded document with available strategy_request_id or conversation_id.
     """
     filename = file.filename or ""
     content_type = file.content_type or ""
+
+    # Resolve optional strategy_request_id and conversation_id from form or query params
+    strat_id_raw = strategy_request_id or request.query_params.get("strategy_request_id")
+    conv_id_raw = conversation_id or request.query_params.get("conversation_id")
+
+    strat_uuid: Optional[uuid.UUID] = None
+    if strat_id_raw:
+        try:
+            strat_uuid = uuid.UUID(str(strat_id_raw))
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid strategy_request_id format in PDF extraction: {strat_id_raw}")
+
+    conv_uuid: Optional[uuid.UUID] = None
+    if conv_id_raw:
+        try:
+            conv_uuid = uuid.UUID(str(conv_id_raw))
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid conversation_id format in PDF extraction: {conv_id_raw}")
+
+    # If conversation_id is known but strategy_request_id is not, resolve strategy_request_id from the DB
+    if conv_uuid and not strat_uuid:
+        try:
+            from backend.app.models.conversation import Conversation
+            with SessionLocal() as db:
+                conv_rec = db.query(Conversation).filter(Conversation.id == conv_uuid).first()
+                if conv_rec and conv_rec.strategy_request_id:
+                    strat_uuid = conv_rec.strategy_request_id
+        except Exception as lookup_err:
+            logger.debug(f"Could not resolve strategy_request_id from conversation in PDF extraction: {lookup_err}")
 
     # Validation: Content-Type and filename extension check
     if content_type.lower() != "application/pdf" and not filename.lower().endswith(".pdf"):
@@ -206,6 +241,8 @@ async def extract_pdf_text(file: UploadFile = File(...)):
             system_prompt=PDF_INSIGHT_SYSTEM_PROMPT,
             response_format={"type": "json_object"},
             operation="pdf_insight_extraction",
+            strategy_request_id=strat_uuid,
+            conversation_id=conv_uuid,
         )
         data = json.loads(raw_response)
     except Exception as llm_err:
@@ -218,7 +255,7 @@ async def extract_pdf_text(file: UploadFile = File(...)):
             with SessionLocal() as db:
                 doc_record = UploadedDocument(
                     id=doc_id,
-                    strategy_request_id=None,
+                    strategy_request_id=strat_uuid,
                     filename=filename,
                     file_size_bytes=len(contents),
                     page_count=total_pages,
@@ -289,7 +326,7 @@ async def extract_pdf_text(file: UploadFile = File(...)):
         with SessionLocal() as db:
             doc_record = UploadedDocument(
                 id=doc_id,
-                strategy_request_id=None,
+                strategy_request_id=strat_uuid,
                 filename=filename,
                 file_size_bytes=len(contents),
                 page_count=total_pages,

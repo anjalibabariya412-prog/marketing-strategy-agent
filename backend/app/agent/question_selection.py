@@ -126,12 +126,14 @@ def select_next_requirement(state: MarketingAgentState) -> Optional[InformationR
     user_prompt = build_question_selection_prompt(context_str, reqs_str)
 
     try:
+        strat_id = state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None)
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=SYSTEM_PROMPT,
             response_format={"type": "json_object"},
             operation="question_selection",
             conversation_id=state.thread_id,
+            strategy_request_id=strat_id,
         )
 
         data = json.loads(raw_response)
@@ -248,12 +250,14 @@ def generate_question(state: MarketingAgentState, selected_requirement: Informat
     )
 
     try:
+        strat_id = state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None)
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=QUESTION_GEN_SYSTEM_PROMPT,
             temperature=0.7,
             operation="question_generation",
             conversation_id=state.thread_id,
+            strategy_request_id=strat_id,
         )
 
         question = raw_response.strip().strip('"').strip("'").strip()
@@ -393,12 +397,14 @@ def generate_first_contextual_message(state: MarketingAgentState) -> str:
     user_prompt = build_first_message_prompt(context_str, reqs_str)
 
     try:
+        strat_id = state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None)
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=FIRST_MESSAGE_SYSTEM_PROMPT,
             response_format={"type": "json_object"},
             operation="first_message_generation",
             conversation_id=state.thread_id,
+            strategy_request_id=strat_id,
         )
 
         data = json.loads(raw_response)

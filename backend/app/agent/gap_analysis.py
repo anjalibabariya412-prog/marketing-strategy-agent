@@ -72,12 +72,14 @@ def analyze_relevance(state: MarketingAgentState) -> bool:
     user_prompt = build_gap_analysis_prompt(context_str, reqs_str)
 
     try:
+        strat_id = state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None)
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=system_prompt,
             response_format={"type": "json_object"},
             operation="relevance_analysis",
             conversation_id=state.thread_id,
+            strategy_request_id=strat_id,
         )
 
         data = json.loads(raw_response)

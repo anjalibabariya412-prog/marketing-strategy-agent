@@ -17,7 +17,6 @@ from backend.app.models import strategy_request as _sr_module  # noqa: E402, F40
 from backend.app.models import business as _biz_module  # noqa: E402, F401
 from backend.app.models import online_presence_source as _ops_module  # noqa: E402, F401
 from backend.app.models import conversation as _conv_module  # noqa: E402, F401
-from backend.app.models import information_requirement as _ir_module  # noqa: E402, F401
 from backend.app.models import chat_message as _cm_module  # noqa: E402, F401
 from backend.app.models import strategy as _st_module  # noqa: E402, F401
 from backend.app.models import llm_usage as _lu_module  # noqa: E402, F401

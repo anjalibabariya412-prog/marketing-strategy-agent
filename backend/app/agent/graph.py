@@ -26,6 +26,7 @@ def analyze_node(state: MarketingAgentState) -> MarketingAgentState:
     Prepares the first contextual message in this upstream node so that initial question
     and first_message_generated flag are committed to checkpoint before ask_node interrupts.
     """
+    state.resolve_strategy_request_id()
     emit_progress("Analyzing your business...", "Evaluating your marketing requirements.")
     if not state.analysis_done:
         logger.info("Graph Node [analyze]: Running analyze_relevance()")
@@ -64,6 +65,7 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
     Graph Node: Serves pending question or prepares next question if needed,
     pauses for user answer via interrupt(), and processes the user's answer upon resumption.
     """
+    state.resolve_strategy_request_id()
     logger.info(
         f"Graph Node [ask] ENTRY | thread_id: '{state.thread_id}' | "
         f"active_req: '{state.active_requirement_id}' | current_question: '{state.current_question}' | "
@@ -141,6 +143,7 @@ def competitor_research_node(state: MarketingAgentState) -> MarketingAgentState:
     Runs when competitors are present and unresearched.
     Safe and non-blocking: errors or empty results never halt the workflow.
     """
+    state.resolve_strategy_request_id()
     logger.info("Graph Node [competitor_research]: Checking for unresearched competitors")
     try:
         latest_answer = None
@@ -160,6 +163,7 @@ def generate_node(state: MarketingAgentState) -> MarketingAgentState:
     Graph Node: Synthesizes business context, known facts, and competitor research to generate the final MarketingStrategy,
     storing the output in state.final_strategy.
     """
+    state.resolve_strategy_request_id()
     logger.info("Graph Node [generate]: Running generate_strategy()")
     emit_progress("Preparing your marketing strategy...", "Generating tailored marketing recommendations.")
     state.pending_question = None

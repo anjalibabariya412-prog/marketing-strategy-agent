@@ -15,18 +15,21 @@ def test_llm_usage_model_registration():
 
 
 def test_llm_usage_columns_and_types():
-    """Verify exact 17 columns, types, and nullability on LLMUsage."""
+    """Verify exact 20 columns, types, and nullability on LLMUsage."""
     table = Base.metadata.tables["llm_usage"]
     cols = table.columns
 
-    # Verify exactly 17 columns exist
-    expected_17_columns = [
+    # Verify exactly 20 columns exist
+    expected_20_columns = [
         "id",
         "strategy_request_id",
         "conversation_id",
         "operation",
         "provider",
         "model",
+        "status",
+        "attempt_number",
+        "error_message",
         "input_tokens",
         "cached_input_tokens",
         "cache_write_tokens",
@@ -39,14 +42,12 @@ def test_llm_usage_columns_and_types():
         "total_cost",
         "created_at",
     ]
-    assert len(cols) == 17, f"Expected 17 columns, got {len(cols)}: {list(cols.keys())}"
-    assert set(cols.keys()) == set(expected_17_columns)
+    assert len(cols) == 20, f"Expected 20 columns, got {len(cols)}: {list(cols.keys())}"
+    assert set(cols.keys()) == set(expected_20_columns)
 
-    # Verify 7 removed columns are NOT present
+    # Verify legacy removed columns are NOT present
     removed_columns = [
         "total_tokens",
-        "status",
-        "error_message",
         "pricing_input_rate",
         "pricing_output_rate",
         "pricing_cached_rate",
@@ -66,6 +67,11 @@ def test_llm_usage_columns_and_types():
     assert cols["operation"].nullable is False
     assert cols["provider"].nullable is False
     assert cols["model"].nullable is False
+
+    # Attempt and status tracking
+    assert cols["status"].nullable is False
+    assert cols["attempt_number"].nullable is False
+    assert cols["error_message"].nullable is True
 
     # Token counts (all nullable)
     assert cols["input_tokens"].nullable is True
@@ -87,18 +93,19 @@ def test_llm_usage_columns_and_types():
 
 
 def test_llm_usage_indexes():
-    """Verify indexes on strategy_request_id, conversation_id, operation, created_at."""
+    """Verify indexes on strategy_request_id, conversation_id, operation, status, created_at."""
     table = Base.metadata.tables["llm_usage"]
     index_columns = {idx.name: [c.name for c in idx.columns] for idx in table.indexes}
 
     assert any("strategy_request_id" in cols for cols in index_columns.values())
     assert any("conversation_id" in cols for cols in index_columns.values())
     assert any("operation" in cols for cols in index_columns.values())
+    assert any("status" in cols for cols in index_columns.values())
     assert any("created_at" in cols for cols in index_columns.values())
 
 
 def test_llm_usage_instance_creation():
-    """Verify model instance can be instantiated with 17-column schema."""
+    """Verify model instance can be instantiated with 20-column schema."""
     usage_id = uuid.uuid4()
     req_id = uuid.uuid4()
     conv_id = uuid.uuid4()
@@ -110,6 +117,9 @@ def test_llm_usage_instance_creation():
         operation="relevance_analysis",
         provider="openai",
         model="gpt-4o-mini",
+        status="success",
+        attempt_number=1,
+        error_message=None,
         input_tokens=100,
         cached_input_tokens=40,
         cache_write_tokens=10,
@@ -128,6 +138,9 @@ def test_llm_usage_instance_creation():
     assert record.operation == "relevance_analysis"
     assert record.provider == "openai"
     assert record.model == "gpt-4o-mini"
+    assert record.status == "success"
+    assert record.attempt_number == 1
+    assert record.error_message is None
     assert record.input_tokens == 100
     assert record.cached_input_tokens == 40
     assert record.cache_write_tokens == 10
@@ -139,3 +152,4 @@ def test_llm_usage_instance_creation():
     assert record.output_cost == Decimal("0.000015")
     assert record.total_cost == Decimal("0.000036")
     assert "gpt-4o-mini" in repr(record)
+    assert "status='success'" in repr(record)

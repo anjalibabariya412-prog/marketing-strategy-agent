@@ -40,54 +40,11 @@ logger = logging.getLogger(__name__)
 MAX_COMPETITORS_PER_RUN = 3
 MAX_DISCOVERED_COMPETITORS = 3
 
-# Common generic non-identifiable descriptors or statements of absence
-GENERIC_PREFIXES = (
-    "two ", "three ", "four ", "five ", "few ", "several ", "some ", "other ",
-    "local ", "independent ", "small ", "various ", "multiple ", "many ",
-)
-
-GENERIC_TERMS = {
-    "none", "no competitors", "no direct competitors", "nobody", "nil", "n/a", "na",
-    "not applicable", "unknown", "undecided", "no other options",
-}
-
-GENERIC_NOUNS = (
-    "tiffin", "service", "shop", "store", "bakery", "bakeries", "firm", "firms",
-    "agency", "agencies", "business", "businesses", "cafe", "cafes", "restaurant",
-    "restaurants", "competitor", "competitors", "player", "players", "seller", "sellers",
-    "brand", "brands", "vendor", "vendors", "provider", "providers", "company", "companies",
-)
-
-GENERIC_SUBSTITUTE_PATTERNS = [
-    r"\bat home\b", r"\bhomemade\b", r"\bin-house\b", r"\bin house\b",
-    r"\bdo it yourself\b", r"\bdiy\b", r"\bby (?:themselves|myself|ourselves)\b",
-    r"\bon their own\b", r"\bmanual(?:ly)?\b", r"\bfrom scratch\b",
-    r"^(?:making|brewing|cooking|preparing|drinking|eating|doing|using)\b",
-]
-
-GENERIC_SUBSTITUTE_PHRASES = {
-    "making coffee at home", "brewing coffee at home", "brewing at home",
-    "making at home", "homemade coffee", "instant coffee at home",
-    "tap water", "drinking tap water", "drinking water", "cooking at home",
-    "diy coffee", "doing it manually", "in-house team", "manual process",
-    "home brew", "home brewed", "homemade", "at home",
-}
-
-
 def is_generic_substitute(name: str) -> bool:
     """
-    Returns True if the string describes a generic activity, behavior, DIY alternative,
-    or substitute (e.g. 'making coffee at home', 'brewing at home', 'diy') rather than
-    an actual commercial brand or company.
+    Deprecated: Semantic substitute detection is now handled exclusively by the LLM classifier.
+    Retained for interface compatibility without hardcoded vocabulary.
     """
-    if not name or not isinstance(name, str):
-        return False
-    clean = name.strip().lower()
-    if clean in GENERIC_SUBSTITUTE_PHRASES:
-        return True
-    for pattern in GENERIC_SUBSTITUTE_PATTERNS:
-        if re.search(pattern, clean):
-            return True
     return False
 
 
@@ -134,31 +91,15 @@ def extract_domain_or_clean_name(name_or_url: str) -> str:
 
 def is_identifiable_competitor(name: str) -> bool:
     """
-    Returns True if the string is likely an identifiable brand, company, or entity name,
-    and False if it is an explicit statement of absence, generic substitute, or generic descriptive phrase
-    (e.g., 'two local tiffin services', 'making coffee at home', 'none', 'no direct competitors').
+    Performs basic technical validation on a candidate competitor name.
+    Validates that the input is a non-empty string of meaningful length.
+    Semantic classification (distinguishing identifiable brands from generic descriptions
+    or non-commercial substitutes) is handled by the LLM classifier.
     """
     if not name or not isinstance(name, str):
         return False
     clean = name.strip()
-    if len(clean) < 2:
-        return False
-    lower = clean.lower()
-    if lower in GENERIC_TERMS:
-        return False
-    if is_generic_substitute(clean):
-        return False
-    if any(phrase in lower for phrase in [
-        "no competitor", "no direct competitor", "don't have any competitor", "dont have any competitor",
-        "none in our area", "no other options", "not aware of", "haven't checked"
-    ]):
-        return False
-    if any(lower.startswith(prefix) for prefix in GENERIC_PREFIXES):
-        if any(noun in lower for noun in GENERIC_NOUNS):
-            return False
-    if any(lower.endswith(" " + noun) or lower == noun for noun in GENERIC_NOUNS):
-        return False
-    return True
+    return len(clean) >= 2
 
 
 def extract_user_stated_context_for_competitor(competitor_name: str, user_answer: Optional[str]) -> Optional[str]:
@@ -239,6 +180,7 @@ def analyze_competitor_with_llm(
     business_context_summary: str,
     user_stated_context: Optional[str] = None,
     conversation_id: Optional[str] = None,
+    strategy_request_id: Optional[str] = None,
 ) -> Optional[CompetitorAnalysisItem]:
     """
     Analyzes retrieved Tavily search results using the centralized LLM service
@@ -260,6 +202,7 @@ def analyze_competitor_with_llm(
             response_format={"type": "json_object"},
             operation="competitor_analysis",
             conversation_id=conversation_id,
+            strategy_request_id=strategy_request_id,
         )
 
         data = json.loads(raw_response)
@@ -326,7 +269,7 @@ def analyze_competitor_with_llm(
 def update_state_competitors(state: MarketingAgentState, competitor_list: List[str]) -> None:
     """
     Appends new non-duplicate competitor names to state.business_context.competitors,
-    excluding the user's own brand and generic substitutes.
+    excluding the user's own brand. Technical validation ensures valid strings.
     """
     if not competitor_list:
         return
@@ -335,15 +278,11 @@ def update_state_competitors(state: MarketingAgentState, competitor_list: List[s
 
     existing_set = {c.lower() for c in state.business_context.competitors}
     for comp in competitor_list:
-        if comp and isinstance(comp, str) and comp.strip():
+        if comp and isinstance(comp, str) and len(comp.strip()) >= 2:
             clean = comp.strip()
             # Exclude user's own brand
             if is_own_brand(clean, state.business_context):
                 logger.info(f"update_state_competitors: Excluded client's own brand: '{clean}'")
-                continue
-            # Exclude generic substitutes
-            if is_generic_substitute(clean):
-                logger.info(f"update_state_competitors: Excluded generic substitute: '{clean}'")
                 continue
             if clean.lower() not in existing_set:
                 existing_set.add(clean.lower())
@@ -354,6 +293,7 @@ def classify_competitor_response(
     user_answer: str,
     business_context_summary: Optional[str] = None,
     conversation_id: Optional[str] = None,
+    strategy_request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Classifies the semantic intent of a user's response regarding competitors into:
@@ -361,14 +301,16 @@ def classify_competitor_response(
     - 'request_discovery': User asked the agent to discover/identify competitors.
     - 'uncertain_or_unknown': User expressed uncertainty or doesn't know competitors.
     - 'generic_category': User provided a generic industry/product category or generic substitutes (e.g. 'coffee brands', 'making coffee at home').
-    Uses the centralized LLM with robust fallback heuristics.
+    Uses the centralized LLM for semantic classification.
+    Safe failure handling returns conservative uncertain_or_unknown intent without hardcoded fallback heuristics.
     """
-    if not user_answer or not user_answer.strip():
+    if not user_answer or not isinstance(user_answer, str) or not user_answer.strip():
         return {
             "intent": "uncertain_or_unknown",
             "competitor_names": [],
+            "generic_substitutes": [],
             "generic_category": None,
-            "reasoning": "Empty response",
+            "reasoning": "Empty or non-string response",
         }
 
     user_prompt = build_competitor_intent_detection_prompt(
@@ -383,26 +325,39 @@ def classify_competitor_response(
             response_format={"type": "json_object"},
             operation="competitor_intent_classification",
             conversation_id=conversation_id,
+            strategy_request_id=strategy_request_id,
         )
 
         data = json.loads(raw_response)
+        if not isinstance(data, dict):
+            raise ValueError(f"LLM did not return a JSON object: {type(data)}")
+
         raw_intent = str(data.get("intent", "")).strip().lower()
         valid_intents = {"provided_specific", "request_discovery", "uncertain_or_unknown", "generic_category"}
-        intent = raw_intent if raw_intent in valid_intents else "generic_category"
+        # If model returned an unexpected or malformed intent, conservatively treat as uncertain_or_unknown
+        intent = raw_intent if raw_intent in valid_intents else "uncertain_or_unknown"
 
         raw_names = data.get("competitor_names") or data.get("competitors") or []
         competitor_names: List[str] = []
         if isinstance(raw_names, list):
             seen = set()
             for n in raw_names:
-                if isinstance(n, str) and n.strip():
+                if isinstance(n, str) and len(n.strip()) >= 2:
                     clean_n = n.strip()
-                    # Exclude generic substitutes from competitor_names
-                    if is_generic_substitute(clean_n):
-                        continue
                     if clean_n.lower() not in seen:
                         seen.add(clean_n.lower())
                         competitor_names.append(clean_n)
+
+        raw_subs = data.get("generic_substitutes") or []
+        generic_substitutes: List[str] = []
+        if isinstance(raw_subs, list):
+            seen_subs = set()
+            for s in raw_subs:
+                if isinstance(s, str) and s.strip():
+                    clean_s = s.strip()
+                    if clean_s.lower() not in seen_subs:
+                        seen_subs.add(clean_s.lower())
+                        generic_substitutes.append(clean_s)
 
         generic_cat = data.get("generic_category")
         if isinstance(generic_cat, str) and generic_cat.strip():
@@ -410,11 +365,11 @@ def classify_competitor_response(
         else:
             generic_cat = None
 
-        # Prioritize user-provided competitor names if present
+        # Harmonize intent with extracted structured entities
         if competitor_names:
             intent = "provided_specific"
         elif intent == "provided_specific" and not competitor_names:
-            if generic_cat:
+            if generic_cat or generic_substitutes:
                 intent = "generic_category"
             else:
                 intent = "uncertain_or_unknown"
@@ -422,60 +377,22 @@ def classify_competitor_response(
         return {
             "intent": intent,
             "competitor_names": competitor_names,
+            "generic_substitutes": generic_substitutes,
             "generic_category": generic_cat,
-            "reasoning": data.get("reasoning", ""),
+            "reasoning": str(data.get("reasoning", "")),
         }
 
     except (LLMServiceError, json.JSONDecodeError, Exception) as e:
-        logger.warning(f"classify_competitor_response LLM call failed: {e}. Using fallback heuristic.")
-        lower = user_answer.strip().lower()
-
-        uncertain_patterns = [
-            "don't know", "dont know", "not sure", "no idea", "unsure", "uncertain",
-            "none that i know", "haven't checked", "havent checked", "no direct competitors",
-            "no competitors", "nobody", "none", "unknown",
-        ]
-        if any(p in lower for p in uncertain_patterns):
-            return {
-                "intent": "uncertain_or_unknown",
-                "competitor_names": [],
-                "generic_category": None,
-                "reasoning": "Fallback detected uncertainty pattern",
-            }
-
-        discovery_patterns = [
-            "find", "discover", "suggest", "identify", "tell me", "research",
-            "can you", "could you", "help me find", "what are my", "who are my",
-        ]
-        if any(p in lower for p in discovery_patterns):
-            return {
-                "intent": "request_discovery",
-                "competitor_names": [],
-                "generic_category": None,
-                "reasoning": "Fallback detected discovery request pattern",
-            }
-
-        if is_generic_substitute(user_answer):
-            return {
-                "intent": "generic_category",
-                "competitor_names": [],
-                "generic_category": user_answer.strip(),
-                "reasoning": "Fallback detected generic substitute",
-            }
-
-        if is_identifiable_competitor(user_answer):
-            return {
-                "intent": "provided_specific",
-                "competitor_names": [user_answer.strip()],
-                "generic_category": None,
-                "reasoning": "Fallback detected single identifiable competitor",
-            }
-
+        logger.warning(
+            f"classify_competitor_response LLM call failed or unparseable: {e}. "
+            "Returning safe uncertain_or_unknown fallback without hardcoded heuristics."
+        )
         return {
-            "intent": "generic_category",
+            "intent": "uncertain_or_unknown",
             "competitor_names": [],
-            "generic_category": user_answer.strip(),
-            "reasoning": "Fallback defaulted to generic category",
+            "generic_substitutes": [],
+            "generic_category": None,
+            "reasoning": f"Safe fallback due to classification failure: {e}",
         }
 
 
@@ -483,6 +400,7 @@ def discover_competitors_with_tavily(
     state: MarketingAgentState,
     generic_category: Optional[str] = None,
     conversation_id: Optional[str] = None,
+    strategy_request_id: Optional[str] = None,
 ) -> List[str]:
     """
     Discovers relevant competitors using business context and Tavily web research.
@@ -507,8 +425,7 @@ def discover_competitors_with_tavily(
         location = tml_req.value.strip()
 
     # Determine core search term
-    # If generic_category is a generic substitute (like 'making coffee at home'), use product_or_service instead
-    if generic_category and generic_category.strip() and not is_generic_substitute(generic_category):
+    if generic_category and generic_category.strip():
         search_term = generic_category.strip()
     elif product_or_service:
         search_term = product_or_service
@@ -579,12 +496,14 @@ def discover_competitors_with_tavily(
     )
 
     try:
+        strat_id = strategy_request_id or (state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None))
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=COMPETITOR_DISCOVERY_SYSTEM_PROMPT,
             response_format={"type": "json_object"},
             operation="competitor_discovery",
             conversation_id=conversation_id or state.thread_id,
+            strategy_request_id=strat_id,
         )
 
         data = json.loads(raw_response)
@@ -606,16 +525,13 @@ def discover_competitors_with_tavily(
             if not isinstance(item, str) or not item.strip():
                 continue
             clean = extract_domain_or_clean_name(item)
+            if not clean or len(clean.strip()) < 2:
+                continue
             lower = clean.lower()
             if lower in seen or lower in existing_lower:
                 continue
             if is_own_brand(clean, state.business_context):
                 logger.info(f"discover_competitors_with_tavily: Excluded client's own brand '{clean}'")
-                continue
-            if is_generic_substitute(clean):
-                logger.info(f"discover_competitors_with_tavily: Excluded generic substitute '{clean}'")
-                continue
-            if not is_identifiable_competitor(clean):
                 continue
             seen.add(lower)
             clean_discovered.append(clean)
@@ -633,6 +549,7 @@ def discover_competitors_with_tavily(
 def conduct_competitor_research(
     state: MarketingAgentState,
     latest_user_answer: Optional[str] = None,
+    strategy_request_id: Optional[str] = None,
 ) -> MarketingAgentState:
     """
     Orchestrates competitor research and discovery.
@@ -645,6 +562,8 @@ def conduct_competitor_research(
     - Safe, robust, and non-blocking: errors or search failures never break workflow.
     """
     try:
+        strat_id = strategy_request_id or (state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None))
+
         if not state.competitor_research:
             state.competitor_research = CompetitorResearchReport()
 
@@ -676,6 +595,7 @@ def conduct_competitor_research(
                 user_answer=candidate_answer,
                 business_context_summary=biz_summary,
                 conversation_id=state.thread_id,
+                strategy_request_id=strat_id,
             )
             intent = classification.get("intent")
             specific_names = classification.get("competitor_names", [])
@@ -694,7 +614,7 @@ def conduct_competitor_research(
         # 2. Gather existing raw competitors from state and also check qa_history for any URLs or named entities
         raw_competitors = state.business_context.competitors or []
 
-        # Filter candidates: exclude own brand, generic substitutes, non-identifiable
+        # Filter candidates: technical validation and own-brand exclusion
         valid_candidates: List[str] = []
         seen: Set[str] = set()
 
@@ -702,17 +622,13 @@ def conduct_competitor_research(
             if not comp or not isinstance(comp, str):
                 continue
             clean = extract_domain_or_clean_name(comp)
+            if not clean or len(clean.strip()) < 2:
+                continue
             lower = clean.lower()
             if lower in seen or lower in researched_lower:
                 continue
             if is_own_brand(clean, state.business_context):
                 logger.info(f"conduct_competitor_research: Excluding client's own brand: '{clean}'")
-                continue
-            if is_generic_substitute(clean):
-                logger.info(f"conduct_competitor_research: Excluding generic substitute: '{clean}'")
-                continue
-            if not is_identifiable_competitor(clean):
-                logger.info(f"conduct_competitor_research: Skipping non-identifiable competitor: '{clean}'")
                 continue
             seen.add(lower)
             valid_candidates.append(clean)
@@ -730,12 +646,15 @@ def conduct_competitor_research(
                 state=state,
                 generic_category=generic_term,
                 conversation_id=state.thread_id,
+                strategy_request_id=strat_id,
             )
             for d in discovered:
                 clean_d = extract_domain_or_clean_name(d)
+                if not clean_d or len(clean_d.strip()) < 2:
+                    continue
                 d_lower = clean_d.lower()
                 if d_lower not in seen and d_lower not in researched_lower:
-                    if not is_own_brand(clean_d, state.business_context) and not is_generic_substitute(clean_d):
+                    if not is_own_brand(clean_d, state.business_context):
                         seen.add(d_lower)
                         valid_candidates.append(clean_d)
             if discovered:
@@ -795,9 +714,9 @@ def conduct_competitor_research(
                         if user_notes:
                             break
 
-            # Targeted search query
+            # Targeted search query including positioning, reviews, and channel signals
             location_term = f" {tml_req.value}" if (tml_req and tml_req.status == RequirementStatus.KNOWN and tml_req.value) else ""
-            query = f'"{comp_name}" {industry_keyword}{location_term} overview products pricing marketing'.strip()
+            query = f'"{comp_name}" {industry_keyword}{location_term} pricing positioning marketing channels reviews customers'.strip()
 
             search_results = execute_tavily_search(
                 query=query,
@@ -812,6 +731,7 @@ def conduct_competitor_research(
                 business_context_summary=biz_summary,
                 user_stated_context=user_notes,
                 conversation_id=state.thread_id,
+                strategy_request_id=strat_id,
             )
 
             if analysis_item:

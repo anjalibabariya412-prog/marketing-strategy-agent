@@ -288,10 +288,12 @@ def test_persist_llm_usage_success():
     assert added_obj.output_cost == Decimal("0.000020")
     # total = 0.000012 + 0.000000 + 0.000020 = 0.000032
     assert added_obj.total_cost == Decimal("0.000032")
-    # Ensure removed columns are not set on the ORM object
+    # Ensure legacy removed columns are not set on the ORM object, and new status/attempt fields are set
+    assert added_obj.status == "success"
+    assert added_obj.attempt_number == 1
+    assert added_obj.error_message is None
     assert not hasattr(added_obj, "total_tokens")
-    assert not hasattr(added_obj, "status")
-    assert not hasattr(added_obj, "error_message")
+    assert not hasattr(added_obj, "pricing_metadata")
     mock_db.commit.assert_called_once()
 
 
@@ -496,3 +498,116 @@ def test_get_llm_response_never_passes_temperature_to_api():
         mock_client.chat.completions.create.assert_called_once()
         create_kwargs = mock_client.chat.completions.create.call_args[1]
         assert "temperature" not in create_kwargs, f"temperature should not be in API call kwargs, got {create_kwargs}"
+
+
+def test_extract_usage_metadata_zero_cache_write_tokens_preserved():
+    """Verify an explicit 0 for cache_write_tokens is preserved as integer 0 and not converted to None."""
+    dict_response = {
+        "model": "gpt-6-luna",
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {
+                "cached_tokens": 0,
+                "cache_write_tokens": 0,
+            },
+        },
+    }
+    result = _extract_usage_metadata(dict_response)
+    assert result["cache_write_tokens"] == 0
+    assert result["cached_tokens"] == 0
+
+
+def test_extract_usage_metadata_standard_openai_fixture_no_cache_write():
+    """Verify official standard OpenAI CompletionUsage response fixture (without cache_write_tokens) defaults to None."""
+    # Official OpenAI API fixture: only cached_tokens inside prompt_tokens_details
+    openai_dict_fixture = {
+        "model": "gpt-4o-2024-08-06",
+        "usage": {
+            "prompt_tokens": 2048,
+            "completion_tokens": 150,
+            "total_tokens": 2198,
+            "prompt_tokens_details": {
+                "cached_tokens": 1024,
+            },
+        },
+    }
+    result = _extract_usage_metadata(openai_dict_fixture)
+    assert result["prompt_tokens"] == 2048
+    assert result["cached_tokens"] == 1024
+    assert result["cache_write_tokens"] is None
+
+
+def test_calculate_llm_costs_cache_write_missing_pricing_rate_yields_none_total():
+    """Verify that if cache_write_tokens are reported but cache_write rate is None, total_cost is None."""
+    usage = {
+        "prompt_tokens": 500,
+        "cached_tokens": 100,
+        "cache_write_tokens": 50,
+        "completion_tokens": 30,
+    }
+    with patch("backend.app.services.llm_service.settings.llm_cache_write_price_per_1m", None):
+        costs = calculate_llm_costs(usage)
+        assert costs["input_cost"] is not None
+        assert costs["cache_write_cost"] is None
+        assert costs["total_cost"] is None
+
+
+def test_calculate_llm_costs_cache_write_rounding_half_up_edge_cases():
+    """Verify Decimal ROUND_HALF_UP rounding behavior on cache_write_cost."""
+    # Rate: $0.125 / 1,000,000 = $0.000000125 per token
+    # 4 tokens * 0.125 / 1M = 0.0000005 -> ROUND_HALF_UP rounds up to 0.000001
+    usage_round_up = {
+        "prompt_tokens": 10,
+        "cached_tokens": 0,
+        "cache_write_tokens": 4,
+        "completion_tokens": 0,
+    }
+    costs = calculate_llm_costs(usage_round_up)
+    assert costs["cache_write_cost"] == Decimal("0.000001")
+
+    # 3 tokens * 0.125 / 1M = 0.000000375 -> ROUND_HALF_UP rounds down to 0.000000
+    usage_round_down = {
+        "prompt_tokens": 10,
+        "cached_tokens": 0,
+        "cache_write_tokens": 3,
+        "completion_tokens": 0,
+    }
+    costs = calculate_llm_costs(usage_round_down)
+    assert costs["cache_write_cost"] == Decimal("0.000000")
+
+    # 12 tokens * 0.125 / 1M = 0.0000015 -> ROUND_HALF_UP rounds up to 0.000002
+    usage_round_half = {
+        "prompt_tokens": 20,
+        "cached_tokens": 0,
+        "cache_write_tokens": 12,
+        "completion_tokens": 0,
+    }
+    costs = calculate_llm_costs(usage_round_half)
+    assert costs["cache_write_cost"] == Decimal("0.000002")
+
+
+def test_persist_llm_usage_with_zero_cache_write_persists_zero():
+    """Verify that _persist_llm_usage with cache_write_tokens=0 persists integer 0 and Decimal('0.000000')."""
+    mock_db = MagicMock()
+    usage_info = {
+        "model": "gpt-6-luna",
+        "prompt_tokens": 100,
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "completion_tokens": 20,
+    }
+    with patch("backend.app.db.session.SessionLocal", return_value=mock_db):
+        mock_db.__enter__.return_value = mock_db
+        _persist_llm_usage(
+            operation="test_zero_cache_write",
+            model="gpt-6-luna",
+            provider="openai",
+            usage_info=usage_info,
+        )
+
+    added_obj = mock_db.add.call_args[0][0]
+    assert added_obj.cache_write_tokens == 0
+    assert added_obj.cache_write_cost == Decimal("0.000000")
+

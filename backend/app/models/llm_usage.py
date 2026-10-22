@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,7 +25,8 @@ class LLMUsage(Base):
     ORM model for the llm_usage table.
 
     Records individual LLM invocation details including provider, model name,
-    operation, token counts (input, cached input, cache write, output), costs, and execution duration.
+    operation, token counts (input, cached input, cache write, output), costs,
+    execution duration, attempt sequence, execution outcome status, and sanitized error messages.
     """
 
     __tablename__ = "llm_usage"
@@ -80,6 +81,32 @@ class LLMUsage(Base):
         String(100),
         nullable=False,
         comment="Name/identifier of LLM model used (e.g. gpt-4o-mini).",
+    )
+
+    # ---------------------------------------------------------------------------
+    # Attempt & Status Tracking
+    # ---------------------------------------------------------------------------
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="success",
+        server_default="success",
+        index=True,
+        comment="Execution outcome status (e.g. success, failed).",
+    )
+
+    attempt_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+        comment="Attempt sequence number for this LLM invocation.",
+    )
+
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Safely sanitized error description or category if the call or attempt failed.",
     )
 
     # ---------------------------------------------------------------------------
@@ -177,6 +204,6 @@ class LLMUsage(Base):
     def __repr__(self) -> str:
         return (
             f"<LLMUsage id={self.id!s} provider={self.provider!r} model={self.model!r} "
-            f"op={self.operation!r}>"
+            f"op={self.operation!r} status={self.status!r} attempt={self.attempt_number}>"
         )
 

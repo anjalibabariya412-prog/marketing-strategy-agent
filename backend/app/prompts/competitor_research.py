@@ -23,6 +23,23 @@ COMPETITOR_ANALYSIS_SYSTEM_PROMPT = (
     "or competing category to the client's business. If search results contain no credible evidence of this entity, or show it operates "
     "in a completely unrelated industry or is a fictitious/unsupported guess, set 'evidence_quality' to 'irrelevant', "
     "'is_relevant_competitor' to false, and indicate in 'summary' that this entity could not be verified as a relevant competitor.\n\n"
+    "WEAKNESS & GAP EXTRACTION RULES (critical for differentiation):\n"
+    "When populating the 'weaknesses' field, look specifically for:\n"
+    "- Underserved customer segments: groups the competitor clearly targets poorly, ignores, or prices out.\n"
+    "- Channel gaps: marketing channels or platforms where the competitor has weak or absent presence.\n"
+    "- Pricing vulnerabilities: price points, tiers, or models that leave segments underserved (e.g., no entry-level tier, no trial, high minimum order).\n"
+    "- Product/service gaps: features, use cases, or service levels the competitor does not address.\n"
+    "- Messaging gaps: audience pains or aspirations the competitor's positioning does not speak to.\n"
+    "- Negative customer feedback patterns: repeated complaints or friction points from reviews or public forums.\n"
+    "Each weakness item should be specific and evidence-grounded (e.g., 'No presence on Instagram despite visual product category' "
+    "rather than 'weak social media presence'). If no evidence supports a specific weakness, leave it as [].\n\n"
+    "STRATEGIC SUMMARY RULE:\n"
+    "The 'summary' field must NOT be a general description of the competitor. "
+    "It must be a 2-3 sentence strategic takeaway that:\n"
+    "(a) names the single most exploitable gap or weakness, and\n"
+    "(b) states a concrete differentiation move the client's business can make against this competitor.\n"
+    "Example: 'CompetitorX focuses exclusively on enterprise clients with high minimums, leaving the SME segment underserved. "
+    "The client should position as the go-to option for small businesses needing enterprise-quality results without long contracts or high minimums.'\n\n"
     "OUTPUT FORMAT:\n"
     "You MUST respond ONLY with a JSON object in this exact schema:\n"
     "{\n"
@@ -36,11 +53,11 @@ COMPETITOR_ANALYSIS_SYSTEM_PROMPT = (
     '  "differentiators": ["<key differentiator 1>", "<key differentiator 2>"],\n'
     '  "marketing_channels_and_campaigns": ["<visible channel/campaign 1>", "<visible channel/campaign 2>"],\n'
     '  "strengths": ["<evidence-supported strength 1>", "<evidence-supported strength 2>"],\n'
-    '  "weaknesses": ["<evidence-supported weakness, limitation, or underserved customer gap 1>"],\n'
+    '  "weaknesses": ["<evidence-supported weakness, underserved segment, channel gap, or pricing vulnerability 1>"],\n'
     '  "source_urls": ["<url 1>", "<url 2>"],\n'
     '  "confidence_score": <number between 0.0 and 1.0>,\n'
     '  "evidence_quality": "high" | "medium" | "low" | "incomplete" | "irrelevant",\n'
-    '  "summary": "<2-3 sentence strategic takeaway for positioning against this competitor>"\n'
+    '  "summary": "<2-3 sentence strategic takeaway: name the exploitable gap and state the concrete differentiation move>",\n'
     "}\n"
     "Do NOT include markdown formatting or commentary outside the JSON object."
 )
@@ -87,40 +104,39 @@ def build_competitor_analysis_prompt(
 
 
 COMPETITOR_INTENT_DETECTION_SYSTEM_PROMPT = (
-    "You are an expert marketing intelligence assistant classifying a client's response regarding their competitors or competitive landscape.\n\n"
-    "Your objective is to analyze the semantic intent of the client's response and categorize it into EXACTLY ONE of the following four categories:\n\n"
+    "You are an expert marketing intelligence assistant analyzing the semantic intent of a client's response regarding their competitors or competitive landscape.\n\n"
+    "Your objective is to evaluate the meaning of the response using surrounding business context rather than keyword matching, and categorize it into EXACTLY ONE of the following four structured intents:\n\n"
     "1. 'provided_specific':\n"
-    "   The client provides one or more specific, named competitors, companies, brands, platforms, or competitor websites/URLs.\n"
-    "   CRITICAL DISTINCTIONS:\n"
-    "   - Real named brands, companies, products, or websites (e.g. 'Lakmé', 'Maybelline', 'Blue Tokai', 'Nescafe', 'sleepyowl.co', 'https://starbucks.in') MUST be extracted into 'competitor_names'.\n"
-    "   - Generic substitutes, DIY alternatives, or behavioral activities (e.g. 'making coffee at home', 'brewing at home', 'drinking tap water', 'cooking at home', 'doing it in-house') are NOT commercial brands. They MUST be extracted into 'generic_substitutes' and NOT into 'competitor_names'.\n"
-    "   - The client's own brand or company name must NOT be treated as a competitor.\n"
-    "   - If the client ONLY mentions generic substitutes (e.g. 'making coffee at home') without naming real brands, classify as 'generic_category' or 'uncertain_or_unknown', NOT as 'provided_specific'.\n\n"
-    "2. 'request_discovery':\n"
-    "   The client explicitly asks or instructs the agent to discover, identify, suggest, research, or find competitors for them.\n"
-    "   Examples: 'Can you discover who my competitors are?', 'Please find my top competitors', 'You tell me who our rivals are', 'Suggest competitors for my business', 'Help me identify the competition in this space'.\n\n"
+    "   The client explicitly identifies one or more specific, named commercial competitor businesses, companies, brands, platforms, products, or websites/URLs.\n"
+    "   - Extract only actual named commercial entities into 'competitor_names' (e.g. 'Acme Corp', 'Lakmé', 'Maybelline', 'Blue Tokai', 'https://sleepyowl.co', 'zomato.com').\n"
+    "   - Do NOT include the client's own company name or brand as a competitor.\n"
+    "   - If the user provides a mix of specific brands and generic substitutes or categories (e.g. 'We compete with Blue Tokai, but many people just make coffee at home'), classify as 'provided_specific', extracting 'Blue Tokai' into 'competitor_names' and 'make coffee at home' into 'generic_substitutes'.\n\n"
+    "2. 'generic_category':\n"
+    "   The client describes a general type or category of business WITHOUT providing identifiable company or brand names, OR mentions non-commercial substitutes/activities.\n"
+    "   - Generic commercial business descriptions: Descriptive phrases that refer to an industry category or unnamed group of businesses (e.g. 'two local tiffin services', 'other accounting firms', 'local bakeries', 'neighbourhood grocery stores', 'boutique design agencies', 'SaaS accounting software'). Extract into 'generic_category'.\n"
+    "   - Non-commercial substitutes and activities: Behavioral alternatives, DIY approaches, or everyday activities that are not commercial businesses (e.g. 'making coffee at home', 'brewing at home', 'cooking ourselves', 'drinking tap water', 'doing it in-house manually', 'spreadsheets'). Extract into 'generic_substitutes'.\n"
+    "   - If the client only provides generic descriptions or non-commercial substitutes without specific brand names, classify as 'generic_category' (or 'uncertain_or_unknown' if expressing lack of competition) and keep 'competitor_names' as [].\n\n"
     "3. 'uncertain_or_unknown':\n"
-    "   The client expresses uncertainty, indicates they do not know, have not analyzed, or are unsure of their competitors.\n"
-    "   Examples: 'I don't know who my competitors are', 'Not sure, we are a new startup', 'No idea honestly', 'Haven't researched our competitors yet', 'I am uncertain at this stage', 'None that I know of'.\n\n"
-    "4. 'generic_category':\n"
-    "   The client provides a generic industry descriptor, product category, or generic substitutes rather than specific company or brand names.\n"
-    "   Examples: 'coffee brands', 'making coffee at home', 'boutique branding agencies', 'SaaS accounting software', 'local cafes', 'D2C skincare brands', 'specialty roasters'.\n\n"
-    "SEMANTIC INTENT RULES:\n"
-    "- Rely on semantic meaning, not just exact keywords.\n"
-    "- If the client provides specific brand or company names/URLs, classify as 'provided_specific' and extract those exact names into 'competitor_names'.\n"
-    "- If the client mentions both a specific competitor and a generic category or substitute (e.g., 'Blue Tokai and making coffee at home'), prioritize the user-provided brand: classify as 'provided_specific' with competitor_names=['Blue Tokai'] and generic_substitutes=['making coffee at home'].\n"
-    "- If the client provides only a generic category or substitute without specific company names, classify as 'generic_category' and extract the category into 'generic_category' or 'generic_substitutes'.\n"
-    "- If the client asks the agent to find/discover competitors, classify as 'request_discovery'.\n"
-    "- If the client states they don't know, have no idea, or are unsure, classify as 'uncertain_or_unknown'.\n"
-    "- Do NOT invent or hallucinate competitor names not present in the user's text.\n\n"
+    "   The client expresses uncertainty, lack of knowledge, absence of competition, or indicates they have not analyzed competitors.\n"
+    "   - Includes statements of absence or uncertainty regardless of phrasing (e.g. 'I don't know who our competitors are', 'Not sure, we are a new startup', 'No direct competitors', 'We have no competition in our niche', 'Nobody else does this', 'No idea honestly', 'Haven't researched this yet', 'None that I know of', 'Unknown at this stage').\n"
+    "   - 'competitor_names' MUST be empty: [].\n\n"
+    "4. 'request_discovery':\n"
+    "   The client asks or instructs the agent to discover, identify, suggest, research, or find competitors for them.\n"
+    "   - Examples: 'Can you discover who my competitors are?', 'Please find our top rivals', 'You tell me who our competitors are', 'Suggest competitors for my business', 'Who competes with us in this market?', 'Help me identify the competition'.\n"
+    "   - 'competitor_names' MUST be empty: [].\n\n"
+    "SEMANTIC REASONING & ROBUSTNESS GUIDELINES:\n"
+    "- Interpret semantic intent dynamically: evaluate natural language variations, colloquialisms, idioms, slang, informal expressions, misspellings, and regional terms according to their contextual meaning.\n"
+    "- Never assume or invent competitor names not explicitly identified in the user's text.\n"
+    "- Do NOT classify generic business descriptions (e.g. 'local tiffin services', 'small bakeries') or non-commercial substitutes (e.g. 'making it at home') as verified competitor names in 'competitor_names'.\n"
+    "- Preserve competitor websites or domains if supplied by the user.\n\n"
     "OUTPUT FORMAT:\n"
-    "You MUST respond ONLY with a JSON object in this exact schema:\n"
+    "You MUST respond ONLY with a JSON object adhering strictly to this schema:\n"
     "{\n"
     '  "intent": "provided_specific" | "request_discovery" | "uncertain_or_unknown" | "generic_category",\n'
     '  "competitor_names": ["<extracted specific competitor name or website 1>", ...],\n'
-    '  "generic_substitutes": ["<extracted generic substitute like making coffee at home>", ...],\n'
-    '  "generic_category": "<extracted generic category or null>",\n'
-    '  "reasoning": "<brief explanation of semantic classification>"\n'
+    '  "generic_substitutes": ["<extracted non-commercial substitute or DIY activity>", ...],\n'
+    '  "generic_category": "<extracted generic category description or null>",\n'
+    '  "reasoning": "<brief explanation of semantic interpretation>"\n'
     "}\n"
     "Do NOT include markdown formatting or commentary outside the JSON object."
 )
@@ -137,8 +153,9 @@ def build_competitor_intent_detection_prompt(
     if business_context_summary and business_context_summary.strip():
         lines.append(f"\nBUSINESS CONTEXT:\n{business_context_summary.strip()}")
     lines.append(
-        "\nClassify the semantic intent into 'provided_specific', 'request_discovery', "
-        "'uncertain_or_unknown', or 'generic_category', and return the JSON object."
+        "\nAnalyze the semantic meaning and intent of the user response using the provided business context. "
+        "Classify the intent into 'provided_specific', 'request_discovery', 'uncertain_or_unknown', or 'generic_category', "
+        "and return ONLY the JSON object adhering strictly to the schema."
     )
     return "\n".join(lines)
 

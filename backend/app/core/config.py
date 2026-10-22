@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # OpenAI LLM settings
     openai_api_key: str
     openai_model: str = "gpt-6-luna"  # default if not set in .env
+    llm_max_retries: int = 0  # default retries for failed LLM calls
 
     # Maximum clarifying questions limit before forcing strategy generation
     max_questions: int = 5

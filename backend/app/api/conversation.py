@@ -33,7 +33,6 @@ from backend.app.services.online_presence_processor import (
     process_online_presence,
     save_online_presence_sources,
 )
-from backend.app.services.requirement_persistence import save_information_requirements
 from backend.app.services.chat_message_persistence import save_chat_message
 from backend.app.services.strategy_persistence import save_strategy
 from backend.app.db.session import SessionLocal
@@ -259,7 +258,8 @@ def execute_start_flow(
             business_context=context,
             online_presence_context=online_presence_ctx,
             document_context=doc_context,
-            thread_id=thread_id
+            thread_id=thread_id,
+            strategy_request_id=str(strategy_request_id) if strategy_request_id else None,
         )
         load_requirements_into_state(state)
 
@@ -284,16 +284,6 @@ def execute_start_flow(
                     logger.error(f"Failed to update failure status in DB: {fail_err}")
             raise
 
-        # 5. Persist InformationRequirements to database
-        try:
-            snapshot = graph.get_state(config)
-            latest_reqs = state.requirements
-            if snapshot and snapshot.values:
-                latest_state = MarketingAgentState.model_validate(snapshot.values)
-                latest_reqs = latest_state.requirements
-            save_information_requirements(conv_id, latest_reqs)
-        except Exception as req_err:
-            logger.error(f"Failed to persist information requirements in /start: {req_err}")
 
         # 6. Update StrategyRequest stage / Conversation record and handle response
         if isinstance(output, dict) and "__interrupt__" in output:
@@ -548,15 +538,6 @@ def reply_to_question(request: ReplyRequest):
                     logger.error(f"Failed to update Conversation status to failed in /reply: {fail_err}")
             raise
 
-        # 6. Persist updated InformationRequirements to database
-        if conv_id:
-            try:
-                snapshot_after = graph.get_state(config)
-                if snapshot_after and snapshot_after.values:
-                    latest_state = MarketingAgentState.model_validate(snapshot_after.values)
-                    save_information_requirements(conv_id, latest_state.requirements)
-            except Exception as req_err:
-                logger.error(f"Failed to persist information requirements in /reply: {req_err}")
 
         # 7. Handle next interrupt or completion and update Conversation record
         if isinstance(output, dict) and "__interrupt__" in output:

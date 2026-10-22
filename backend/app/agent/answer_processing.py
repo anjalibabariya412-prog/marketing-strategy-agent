@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Optional, List
+from typing import Optional, List, Union
+import uuid
 
 from backend.app.core.config import settings
 from backend.app.schemas.agent.agent_state import MarketingAgentState
@@ -34,7 +35,11 @@ from backend.app.prompts.answer_processing import (
 
 
 
-def extract_competitors(user_answer: str, conversation_id: Optional[str] = None) -> List[str]:
+def extract_competitors(
+    user_answer: str,
+    conversation_id: Optional[Union[uuid.UUID, str]] = None,
+    strategy_request_id: Optional[Union[uuid.UUID, str]] = None,
+) -> List[str]:
     """
     Extracts structured competitor names/alternatives from a natural language user response using LLM.
     Preserves exact user wording when a competitor cannot be named specifically (e.g. 'two local tiffin services').
@@ -52,6 +57,7 @@ def extract_competitors(user_answer: str, conversation_id: Optional[str] = None)
             response_format={"type": "json_object"},
             operation="competitor_extraction",
             conversation_id=conversation_id,
+            strategy_request_id=strategy_request_id,
         )
 
         data = json.loads(raw_response)
@@ -84,10 +90,15 @@ def update_state_competitors(state: MarketingAgentState, competitor_list: List[s
     tavily_update_state_competitors(state, competitor_list)
 
 
-def extract_initial_context(user_message: str) -> BusinessContext:
+def extract_initial_context(
+    user_message: str,
+    conversation_id: Optional[Union[uuid.UUID, str]] = None,
+    strategy_request_id: Optional[Union[uuid.UUID, str]] = None,
+) -> BusinessContext:
     """
     Extracts BusinessContext fields from a user's initial free-text introduction message.
     Leaves unmentioned fields as None.
+    Propagates available conversation_id and strategy_request_id to LLM calls.
     Returns an empty BusinessContext on failure.
     """
     if not user_message or not user_message.strip():
@@ -101,6 +112,8 @@ def extract_initial_context(user_message: str) -> BusinessContext:
             system_prompt=INITIAL_CONTEXT_SYSTEM_PROMPT,
             response_format={"type": "json_object"},
             operation="initial_context_extraction",
+            conversation_id=conversation_id,
+            strategy_request_id=strategy_request_id,
         )
 
         data = json.loads(raw_response)
@@ -110,7 +123,11 @@ def extract_initial_context(user_message: str) -> BusinessContext:
             marketing_goal=data.get("marketing_goal"),
             target_audience=data.get("target_audience")
         )
-        comps = extract_competitors(user_message)
+        comps = extract_competitors(
+            user_message,
+            conversation_id=conversation_id,
+            strategy_request_id=strategy_request_id,
+        )
         if comps:
             context.competitors = comps
         logger.info(f"Extracted initial context: {context.model_dump()}")
@@ -165,12 +182,14 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
     )
 
     try:
+        strat_id = state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None)
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=ANSWER_CLASSIFICATION_SYSTEM_PROMPT,
             response_format={"type": "json_object"},
             operation="answer_classification",
             conversation_id=state.thread_id,
+            strategy_request_id=strat_id,
         )
 
         data = json.loads(raw_response)
@@ -193,7 +212,7 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
             logger.info(f"Requirement [{active_req_id}] updated to {final_status.value} with value: {final_value}")
 
         if active_req_id in ("competitive_landscape", "competitors") or "competitor" in str(active_req_id).lower():
-            comps = extract_competitors(user_answer, conversation_id=state.thread_id)
+            comps = extract_competitors(user_answer, conversation_id=state.thread_id, strategy_request_id=strat_id)
             if comps:
                 update_state_competitors(state, comps)
 
@@ -209,7 +228,7 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
                 "better than", "cheaper than", "compared to", "http://", "https://", ".com", ".in", ".co", ".org"
             )
             if any(ind in lower_ans for ind in competitor_indicators):
-                comps = extract_competitors(user_answer, conversation_id=state.thread_id)
+                comps = extract_competitors(user_answer, conversation_id=state.thread_id, strategy_request_id=strat_id)
                 if comps:
                     update_state_competitors(state, comps)
 
@@ -227,7 +246,7 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
                             inc_req.value = str(inc_val).strip()
                             logger.info(f"Requirement [{inc_id}] incidentally updated to KNOWN with value: {inc_val}")
                             if inc_id in ("competitive_landscape", "competitors") or "competitor" in str(inc_id).lower():
-                                inc_comps = extract_competitors(str(inc_val))
+                                inc_comps = extract_competitors(str(inc_val), conversation_id=state.thread_id, strategy_request_id=strat_id)
                                 if inc_comps:
                                     update_state_competitors(state, inc_comps)
                                 inc_req.status = RequirementStatus.KNOWN
@@ -376,12 +395,14 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
     )
 
     try:
+        strat_id = state.resolve_strategy_request_id() if hasattr(state, "resolve_strategy_request_id") else getattr(state, "strategy_request_id", None)
         raw_response = get_llm_response(
             prompt=user_prompt,
             system_prompt=MERGED_TURN_SYSTEM_PROMPT,
             response_format={"type": "json_object"},
             operation="merged_turn_processing",
             conversation_id=state.thread_id,
+            strategy_request_id=strat_id,
         )
 
         data = json.loads(raw_response)
@@ -413,7 +434,7 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
             req.value = final_value
 
         if active_req_id in ("competitive_landscape", "competitors") or "competitor" in str(active_req_id).lower():
-            comps = extract_competitors(user_answer, conversation_id=state.thread_id)
+            comps = extract_competitors(user_answer, conversation_id=state.thread_id, strategy_request_id=strat_id)
             if comps:
                 update_state_competitors(state, comps)
 
@@ -429,7 +450,7 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
                 "better than", "cheaper than", "compared to", "http://", "https://", ".com", ".in", ".co", ".org"
             )
             if any(ind in lower_ans for ind in competitor_indicators):
-                comps = extract_competitors(user_answer, conversation_id=state.thread_id)
+                comps = extract_competitors(user_answer, conversation_id=state.thread_id, strategy_request_id=strat_id)
                 if comps:
                     update_state_competitors(state, comps)
 
@@ -448,7 +469,7 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
                             inc_req.value = str(inc_val).strip()
                             incidental_ids.append(inc_id)
                             if inc_id in ("competitive_landscape", "competitors") or "competitor" in str(inc_id).lower():
-                                inc_comps = extract_competitors(str(inc_val))
+                                inc_comps = extract_competitors(str(inc_val), conversation_id=state.thread_id, strategy_request_id=strat_id)
                                 if inc_comps:
                                     update_state_competitors(state, inc_comps)
                                 inc_req.status = RequirementStatus.KNOWN

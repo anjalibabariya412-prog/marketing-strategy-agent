@@ -60,6 +60,10 @@ class MarketingAgentState(BaseModel):
         default=None,
         description="Unique session/conversation thread identifier for state persistence and LangGraph checkpointing."
     )
+    strategy_request_id: Optional[str] = Field(
+        default=None,
+        description="Unique strategy request identifier for LLM usage tracking and lifecycle association."
+    )
     online_presence_context: Optional[OnlinePresenceContext] = Field(
         default=None,
         description="Structured summary of the client's online presence extracted from scraped website/social links."
@@ -97,3 +101,25 @@ class MarketingAgentState(BaseModel):
         Return a list of all InformationRequirement items from self.requirements where is_must_have is True and status is UNKNOWN.
         """
         return [req for req in self.requirements if req.is_must_have and req.status == RequirementStatus.UNKNOWN]
+
+    def resolve_strategy_request_id(self) -> Optional[str]:
+        """
+        Returns strategy_request_id if already present. If missing but thread_id is set
+        and represents a persisted Conversation, safely looks up strategy_request_id from the DB.
+        """
+        if self.strategy_request_id:
+            return self.strategy_request_id
+        if self.thread_id:
+            try:
+                import uuid
+                conv_uuid = uuid.UUID(str(self.thread_id))
+                from backend.app.db.session import SessionLocal
+                from backend.app.models.conversation import Conversation
+                with SessionLocal() as db:
+                    conv_rec = db.query(Conversation).filter(Conversation.id == conv_uuid).first()
+                    if conv_rec and conv_rec.strategy_request_id:
+                        self.strategy_request_id = str(conv_rec.strategy_request_id)
+                        return self.strategy_request_id
+            except Exception:
+                pass
+        return None

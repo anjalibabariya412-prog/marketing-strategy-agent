@@ -17,7 +17,6 @@ from backend.app.db.base import Base
 
 if TYPE_CHECKING:
     from .chat_message import ChatMessage
-    from .information_requirement import InformationRequirement
     from .llm_usage import LLMUsage
     from .strategy import Strategy
     from .strategy_request import StrategyRequest
@@ -107,12 +106,6 @@ class Conversation(Base):
     strategy_request: Mapped["StrategyRequest"] = relationship(
         "StrategyRequest",
         back_populates="conversation",
-    )
-
-    information_requirements: Mapped[List["InformationRequirement"]] = relationship(
-        "InformationRequirement",
-        back_populates="conversation",
-        cascade="all, delete-orphan",
     )
 
     chat_messages: Mapped[List["ChatMessage"]] = relationship(
