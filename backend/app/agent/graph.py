@@ -123,15 +123,18 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
             logger.info(f"Graph Node [ask]: Resumed with answer -> Calling process_answer_for_requirement()")
             process_answer_for_requirement(state, str(user_answer))
 
-        # Ensure next question is populated as pending if answer processing did not populate pending fields
+        # Ensure next question is populated as pending if answer processing did not populate pending fields and state is not yet sufficient
         if not state.pending_question or not state.pending_requirement_id:
-            logger.info("Graph Node [ask]: Post-answer processing pending question missing -> Calling prepare_next_question()")
-            prepare_next_question(state)
-            if state.current_question and state.active_requirement_id:
-                state.pending_question = state.current_question
-                state.pending_requirement_id = state.active_requirement_id
-                state.current_question = None
-                state.active_requirement_id = None
+            if not is_sufficient(state):
+                logger.info("Graph Node [ask]: Post-answer processing pending question missing -> Calling prepare_next_question()")
+                prepare_next_question(state)
+                if state.current_question and state.active_requirement_id:
+                    state.pending_question = state.current_question
+                    state.pending_requirement_id = state.active_requirement_id
+                    state.current_question = None
+                    state.active_requirement_id = None
+            else:
+                logger.info("Graph Node [ask]: State is sufficient -> Skipping prepare_next_question()")
 
     return state
 

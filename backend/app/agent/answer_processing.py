@@ -220,17 +220,6 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
             if req:
                 req.status = RequirementStatus.KNOWN
                 req.value = user_answer.strip()
-        else:
-            # If user mentioned competitors or competitor URLs in this answer, extract them
-            lower_ans = user_answer.lower()
-            competitor_indicators = (
-                "competitor", "compete", "rival", "alternative", "versus", " vs ", "vs.",
-                "better than", "cheaper than", "compared to", "http://", "https://", ".com", ".in", ".co", ".org"
-            )
-            if any(ind in lower_ans for ind in competitor_indicators):
-                comps = extract_competitors(user_answer, conversation_id=state.thread_id, strategy_request_id=strat_id)
-                if comps:
-                    update_state_competitors(state, comps)
 
         # 2. Process INCIDENTALLY KNOWN requirements
         incidentals = data.get("incidentally_known_requirements", [])
@@ -442,17 +431,6 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
             if req:
                 req.status = RequirementStatus.KNOWN
                 req.value = user_answer.strip()
-        else:
-            # If user mentioned competitors or competitor URLs in this answer, extract them
-            lower_ans = user_answer.lower()
-            competitor_indicators = (
-                "competitor", "compete", "rival", "alternative", "versus", " vs ", "vs.",
-                "better than", "cheaper than", "compared to", "http://", "https://", ".com", ".in", ".co", ".org"
-            )
-            if any(ind in lower_ans for ind in competitor_indicators):
-                comps = extract_competitors(user_answer, conversation_id=state.thread_id, strategy_request_id=strat_id)
-                if comps:
-                    update_state_competitors(state, comps)
 
         # Process incidental requirements
         incidental_ids = []

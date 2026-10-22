@@ -224,10 +224,11 @@ STRATEGY_GENERATION_SYSTEM_PROMPT = (
     "CONTENT RULES (for all list fields):\n"
     "Each list field must be a JSON array of plain-text strings or structured objects as specified in REQUIRED JSON STRUCTURE. "
     "Each item is one concise, self-contained strategy point or object. "
-    "Do NOT use unnecessary Markdown syntax inside list items (except for structural section headers like '#### Build on Your Current Marketing Channels', '#### Additional Marketing Opportunities to Consider', and bold channel titles like '**Website**' where explicitly required). "
-    "Write each point as a complete, meaningful sentence or short paragraph. "
-    "Do not write single-word or empty items. "
-    "Aim for 3-8 items per field depending on the depth needed.\n\n"
+    "Do NOT use unnecessary Markdown syntax inside list items (except for structural section headers like '#### Build on Your Current Marketing Channels', '#### Additional Marketing Opportunities to Consider', and bold channel titles like '**Website**' where explicitly required).\n"
+    "- HIGH DENSITY & CONCISENESS: Prioritize strategic density and concrete substance over verbosity. Avoid wordy narratives, conversational fluff, and repetitive explanations. "
+    "Express each recommendation in 1-2 punchy, substantive sentences with high informational value.\n"
+    "- AIM FOR 3-5 FOCUSED ITEMS PER SECTION: Provide 3-5 high-impact, business-tailored items per field rather than sprawling, repetitive lists.\n"
+    "- ACTION PLAN STRUCTURE: Provide exactly 4 milestone items corresponding to Week 1, Week 2, Week 3, and Week 4. Format each with a bold milestone header '**Week X: [Milestone Title]**' followed by 2-3 specific execution actions and 1 clear review metric. Be concrete, specific, and actionable without writing multi-paragraph essays.\n\n"
 
     "REQUIRED JSON STRUCTURE:\n"
     "All 9 sections below are mandatory and must be populated with business-tailored recommendations. Do not omit any section.\n"
@@ -524,7 +525,7 @@ def build_strategy_generation_prompt(state: MarketingAgentState) -> str:
         )
 
     prompt_parts.append(
-        "\nSynthesize all available context above into a high-quality, tailored marketing strategy JSON object."
+        "\nSynthesize all available context above into a high-density, concise, tailored marketing strategy JSON object adhering strictly to the schema."
     )
 
     return "\n".join(prompt_parts)
