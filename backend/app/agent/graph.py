@@ -135,6 +135,10 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
                     state.active_requirement_id = None
             else:
                 logger.info("Graph Node [ask]: State is sufficient -> Skipping prepare_next_question()")
+                emit_progress(
+                    "Generating your marketing strategy plan...",
+                    "Analyzing your business context, competitors, and goals to build your personalized plan."
+                )
 
     return state
 

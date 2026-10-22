@@ -12,7 +12,6 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor
 
 from tavily import TavilyClient
 
@@ -452,8 +451,8 @@ def discover_competitors_with_tavily(
         timeout=15.0,
     )
 
-    # Use second query only if primary query returned critically sparse results (< 2)
-    if len(search_results) < 2 and len(queries) > 1:
+    # Use second query if primary query returned sparse results
+    if len(search_results) < 3 and len(queries) > 1:
         logger.info(f"discover_competitors_with_tavily: Supplementing with second query '{queries[1]}'")
         second_res = execute_tavily_search(
             query=queries[1],
@@ -570,8 +569,52 @@ def conduct_competitor_research(
 
         researched_lower = {name.lower() for name in state.competitor_research.researched_names}
 
-        # 1. First, inspect existing competitors already recorded in state
+        # 1. Determine candidate answer or scan qa_history for competitor details
+        candidate_answer = latest_user_answer
+        if not candidate_answer and state.qa_history:
+            for turn in reversed(state.qa_history):
+                ans = str(turn.answer or "")
+                if turn.requirement_id in ("competitive_landscape", "competitors") or "competitor" in str(turn.requirement_id or "").lower():
+                    candidate_answer = ans
+                    break
+                elif any(kw in ans.lower() for kw in ["competitor", "compete", "rival", "vs", "versus"]) or "http" in ans:
+                    candidate_answer = ans
+                    break
+
+        if not candidate_answer:
+            comp_req = state.get_requirement_by_id("competitive_landscape")
+            if comp_req and comp_req.value:
+                candidate_answer = comp_req.value
+
+        discovery_triggered = False
+        generic_term = None
+
+        if candidate_answer:
+            biz_summary = f"{state.business_context.product_or_service or ''} {state.business_context.company_name or ''}".strip()
+            classification = classify_competitor_response(
+                user_answer=candidate_answer,
+                business_context_summary=biz_summary,
+                conversation_id=state.thread_id,
+                strategy_request_id=strat_id,
+            )
+            intent = classification.get("intent")
+            specific_names = classification.get("competitor_names", [])
+            generic_term = classification.get("generic_category")
+
+            # Prioritize user-provided competitor names
+            if intent == "provided_specific" and specific_names:
+                update_state_competitors(state, specific_names)
+            elif intent in ("request_discovery", "uncertain_or_unknown"):
+                discovery_triggered = True
+            elif intent == "generic_category":
+                discovery_triggered = True
+                if not generic_term:
+                    generic_term = candidate_answer.strip()
+
+        # 2. Gather existing raw competitors from state and also check qa_history for any URLs or named entities
         raw_competitors = state.business_context.competitors or []
+
+        # Filter candidates: technical validation and own-brand exclusion
         valid_candidates: List[str] = []
         seen: Set[str] = set()
 
@@ -590,64 +633,10 @@ def conduct_competitor_research(
             seen.add(lower)
             valid_candidates.append(clean)
 
-        # 2. Only if no valid competitors are known in state, extract or classify from user's answer
-        discovery_triggered = False
-        generic_term = None
-
-        candidate_answer = latest_user_answer
-        if not candidate_answer and state.qa_history:
-            for turn in reversed(state.qa_history):
-                ans = str(turn.answer or "")
-                if turn.requirement_id in ("competitive_landscape", "competitors") or "competitor" in str(turn.requirement_id or "").lower():
-                    candidate_answer = ans
-                    break
-                elif any(kw in ans.lower() for kw in ["competitor", "compete", "rival", "vs", "versus"]) or "http" in ans:
-                    candidate_answer = ans
-                    break
-
-        if not candidate_answer:
-            comp_req = state.get_requirement_by_id("competitive_landscape")
-            if comp_req and comp_req.value:
-                candidate_answer = comp_req.value
-
-        # Only run LLM intent classification if valid competitors were NOT already supplied/extracted
-        if not valid_candidates and candidate_answer:
-            biz_summary = f"{state.business_context.product_or_service or ''} {state.business_context.company_name or ''}".strip()
-            classification = classify_competitor_response(
-                user_answer=candidate_answer,
-                business_context_summary=biz_summary,
-                conversation_id=state.thread_id,
-                strategy_request_id=strat_id,
-            )
-            intent = classification.get("intent")
-            specific_names = classification.get("competitor_names", [])
-            generic_term = classification.get("generic_category")
-
-            # Prioritize user-provided competitor names
-            if intent == "provided_specific" and specific_names:
-                update_state_competitors(state, specific_names)
-                for comp in specific_names:
-                    clean = extract_domain_or_clean_name(comp)
-                    if clean and len(clean.strip()) >= 2:
-                        lower = clean.lower()
-                        if lower not in seen and lower not in researched_lower:
-                            if not is_own_brand(clean, state.business_context):
-                                seen.add(lower)
-                                valid_candidates.append(clean)
-            elif intent in ("request_discovery", "uncertain_or_unknown"):
-                discovery_triggered = True
-            elif intent == "generic_category":
-                discovery_triggered = True
-                if not generic_term:
-                    generic_term = candidate_answer.strip()
-
-        # 3. Automatic competitor discovery: trigger ONLY when no valid competitors exist in state
-        # (Never discover extra competitors when user has already supplied identifiable ones)
+        # 3. Automatic competitor discovery: trigger if no valid candidates exist, or if discovery requested
         should_discover = (
-            not valid_candidates
-            and len(state.competitor_research.competitors) == 0
-            and not state.competitor_research.discovery_attempted
-            and (discovery_triggered or not candidate_answer)
+            (not valid_candidates and len(state.competitor_research.competitors) == 0 and not state.competitor_research.discovery_attempted)
+            or (discovery_triggered and len(valid_candidates) < MAX_COMPETITORS_PER_RUN)
         )
         if should_discover:
             state.competitor_research.discovery_attempted = True
@@ -710,56 +699,41 @@ def conduct_competitor_research(
 
         biz_summary = "\n".join(biz_parts) if biz_parts else "B2B / B2C business"
         industry_keyword = ctx.product_or_service or ctx.company_name or ""
-        location_term = f" {tml_req.value}" if (tml_req and tml_req.status == RequirementStatus.KNOWN and tml_req.value) else ""
 
-        def _research_single_competitor(comp_name: str) -> tuple[str, Optional[CompetitorAnalysisItem]]:
-            try:
-                user_notes = extract_user_stated_context_for_competitor(comp_name, candidate_answer)
-                if not user_notes and state.qa_history:
-                    for turn in state.qa_history:
-                        if comp_name.lower() in str(turn.answer or "").lower():
-                            user_notes = extract_user_stated_context_for_competitor(comp_name, turn.answer)
-                            if user_notes:
-                                break
+        for comp_name in to_research:
+            emit_progress(
+                "Conducting competitor research...",
+                f"Analyzing web presence and market positioning for {comp_name}."
+            )
 
-                # Targeted search query including positioning, reviews, and channel signals
-                query = f'"{comp_name}" {industry_keyword}{location_term} pricing positioning marketing channels reviews customers'.strip()
+            user_notes = extract_user_stated_context_for_competitor(comp_name, candidate_answer)
+            if not user_notes and state.qa_history:
+                for turn in state.qa_history:
+                    if comp_name.lower() in turn.answer.lower():
+                        user_notes = extract_user_stated_context_for_competitor(comp_name, turn.answer)
+                        if user_notes:
+                            break
 
-                search_results = execute_tavily_search(
-                    query=query,
-                    api_key=settings.tavily_api_key,
-                    max_results=5,
-                    timeout=15.0,
-                )
+            # Targeted search query including positioning, reviews, and channel signals
+            location_term = f" {tml_req.value}" if (tml_req and tml_req.status == RequirementStatus.KNOWN and tml_req.value) else ""
+            query = f'"{comp_name}" {industry_keyword}{location_term} pricing positioning marketing channels reviews customers'.strip()
 
-                analysis_item = analyze_competitor_with_llm(
-                    competitor_name=comp_name,
-                    search_results=search_results,
-                    business_context_summary=biz_summary,
-                    user_stated_context=user_notes,
-                    conversation_id=state.thread_id,
-                    strategy_request_id=strat_id,
-                )
-                return comp_name, analysis_item
-            except Exception as comp_err:
-                logger.error(f"Error researching competitor '{comp_name}': {comp_err}")
-                return comp_name, None
+            search_results = execute_tavily_search(
+                query=query,
+                api_key=settings.tavily_api_key,
+                max_results=5,
+                timeout=15.0,
+            )
 
-        emit_progress(
-            "Conducting competitor research...",
-            f"Analyzing web presence and market positioning for {', '.join(to_research)}."
-        )
+            analysis_item = analyze_competitor_with_llm(
+                competitor_name=comp_name,
+                search_results=search_results,
+                business_context_summary=biz_summary,
+                user_stated_context=user_notes,
+                conversation_id=state.thread_id,
+                strategy_request_id=strat_id,
+            )
 
-        max_workers = min(3, len(to_research))
-        if max_workers > 1:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Maintain deterministic order matching to_research
-                futures = [executor.submit(_research_single_competitor, c) for c in to_research]
-                results = [f.result() for f in futures]
-        else:
-            results = [_research_single_competitor(c) for c in to_research]
-
-        for comp_name, analysis_item in results:
             if analysis_item:
                 state.competitor_research.competitors.append(analysis_item)
                 logger.info(f"Successfully analyzed competitor '{comp_name}' with {len(analysis_item.source_urls)} source(s).")

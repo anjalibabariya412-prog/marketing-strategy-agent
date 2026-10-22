@@ -607,11 +607,15 @@ function App() {
   const [startError, setStartError] = useState(null);
   const [progressStatus, setProgressStatus] = useState(null);
   const startAbortControllerRef = useRef(null);
+  const replyAbortControllerRef = useRef(null);
 
   useEffect(() => {
     return () => {
       if (startAbortControllerRef.current) {
         startAbortControllerRef.current.abort();
+      }
+      if (replyAbortControllerRef.current) {
+        replyAbortControllerRef.current.abort();
       }
     };
   }, []);
@@ -640,6 +644,8 @@ function App() {
   const [answerInput, setAnswerInput] = useState('');
   const [questionLoading, setQuestionLoading] = useState(false);
   const [questionError, setQuestionError] = useState(null);
+  const [isGeneratingStrategy, setIsGeneratingStrategy] = useState(false);
+  const [strategyProgressDetail, setStrategyProgressDetail] = useState(null);
   const [isTransitioningToStrategy, setIsTransitioningToStrategy] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
 
@@ -757,7 +763,7 @@ function App() {
         behavior: 'smooth'
       });
     }
-  }, [messages, questionLoading]);
+  }, [messages, questionLoading, isGeneratingStrategy]);
 
   useEffect(() => {
     if (threadId && !showIntroScreen && !isCompleted && !isTransitioningToStrategy && !questionLoading) {
@@ -901,8 +907,9 @@ function App() {
     setRequirementId(data.requirement_id || null);
 
     if (data.status === 'completed') {
-      setIsTransitioningToStrategy(true);
-      setTimeout(() => setIsCompleted(true), 6000);
+      setIsGeneratingStrategy(false);
+      setIsTransitioningToStrategy(false);
+      setIsCompleted(true);
     } else if (data.question) {
       const summaryContent = extractBusinessSummary(data.question);
       const dynamicQuestion = extractDynamicQuestion(data.question);
@@ -1098,6 +1105,31 @@ function App() {
     }
   };
 
+  const handleReplySuccess = (data) => {
+    if (data.thread_id) setThreadId(data.thread_id);
+    setStatus(data.status);
+    setRequirementId(data.requirement_id || null);
+
+    if (data.status === 'completed') {
+      setIsGeneratingStrategy(false);
+      setQuestionLoading(false);
+      setIsTransitioningToStrategy(false);
+      setIsCompleted(true);
+    } else if (data.question) {
+      const nextAgentMsg = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        sender: 'agent',
+        content: data.question,
+        requirementId: data.requirement_id || null,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, nextAgentMsg]);
+
+      setQuestionNumber((prev) => prev + 1);
+      setCurrentQuestion(data.question);
+    }
+  };
+
   const handleNextQuestion = async () => {
     if (!answerInput.trim() || questionLoading) return;
 
@@ -1116,12 +1148,21 @@ function App() {
 
     setQuestionLoading(true);
     setQuestionError(null);
+    setIsGeneratingStrategy(false);
+    setStrategyProgressDetail(null);
+
+    const abortController = new AbortController();
+    replyAbortControllerRef.current = abortController;
 
     try {
       const response = await fetch(`${API_BASE_URL}/reply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream, application/json',
+        },
         body: JSON.stringify({ thread_id: threadId, message: messageText }),
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -1132,33 +1173,82 @@ function App() {
         throw new Error(detailMsg || `Server returned status ${response.status}`);
       }
 
-      const data = await response.json();
-      if (data.thread_id) setThreadId(data.thread_id);
-      setStatus(data.status);
-      setRequirementId(data.requirement_id || null);
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream') && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let currentEvent = null;
+        let completedData = null;
 
-      if (data.status === 'completed') {
-        setIsTransitioningToStrategy(true);
-        setTimeout(() => setIsCompleted(true), 6000);
-      } else if (data.question) {
-        const nextAgentMsg = {
-          id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          sender: 'agent',
-          content: data.question,
-          requirementId: data.requirement_id || null,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, nextAgentMsg]);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
 
-        setQuestionNumber((prev) => prev + 1);
-        setCurrentQuestion(data.question);
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) {
+              currentEvent = null;
+              continue;
+            }
+            if (line.startsWith('event:')) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              const dataStr = line.slice(5).trim();
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (currentEvent === 'progress' || parsed.type === 'progress') {
+                  const msg = (parsed.message || '').toLowerCase();
+                  if (
+                    msg.includes('strategy') ||
+                    msg.includes('competitor') ||
+                    msg.includes('generating your marketing strategy plan')
+                  ) {
+                    setIsGeneratingStrategy(true);
+                    if (parsed.detail) {
+                      setStrategyProgressDetail(parsed.detail);
+                    }
+                  }
+                } else if (currentEvent === 'complete' || (parsed && parsed.status && !parsed.error)) {
+                  completedData = parsed;
+                } else if (currentEvent === 'error' || (parsed && parsed.error)) {
+                  throw new Error(parsed.error || 'Workflow execution error');
+                }
+              } catch (parseErr) {
+                if (currentEvent === 'error') {
+                  throw new Error(dataStr);
+                }
+                if (parseErr.message && !parseErr.message.includes('JSON')) {
+                  throw parseErr;
+                }
+              }
+            }
+          }
+        }
+
+        if (completedData) {
+          handleReplySuccess(completedData);
+        } else {
+          throw new Error('Reply processing ended unexpectedly. Please try again.');
+        }
+      } else {
+        const data = await response.json();
+        handleReplySuccess(data);
       }
     } catch (err) {
+      if (err.name === 'AbortError') return;
       console.error('Failed to send answer:', err);
       setAnswerInput(messageText);
       setQuestionError(err.message || 'Failed to send answer. Please try again.');
     } finally {
       setQuestionLoading(false);
+      setIsGeneratingStrategy(false);
+      setStrategyProgressDetail(null);
+      replyAbortControllerRef.current = null;
     }
   };
 
@@ -1690,18 +1780,34 @@ function App() {
                     </div>
                   ))}
 
-                  {/* Temporary Thinking Indicator (does not mutate messages array) */}
+                  {/* Thinking or Strategy Generation Indicator */}
                   {questionLoading && (
                     <div className="chat-message-row agent-row thinking-row">
                       <div className="chat-avatar agent-avatar" aria-hidden="true">
                         <Icons.Bot />
                       </div>
-                      <div className="chat-bubble agent-bubble thinking-bubble">
-                        <div className="typing-dots" aria-label="Thinking">
-                          <span className="dot" />
-                          <span className="dot" />
-                          <span className="dot" />
-                        </div>
+                      <div
+                        className={`chat-bubble agent-bubble ${
+                          isGeneratingStrategy ? 'strategy-generating-bubble' : 'thinking-bubble'
+                        }`}
+                      >
+                        {isGeneratingStrategy ? (
+                          <div className="strategy-generating-status" role="status" aria-live="polite">
+                            <span className="strategy-generating-spinner" aria-hidden="true" />
+                            <div className="strategy-generating-content">
+                              <span className="strategy-generating-title">Generating your marketing strategy plan…</span>
+                              {strategyProgressDetail && (
+                                <span className="strategy-generating-detail">{strategyProgressDetail}</span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="typing-dots" aria-label="Thinking">
+                            <span className="dot" />
+                            <span className="dot" />
+                            <span className="dot" />
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

@@ -465,11 +465,15 @@ def start_conversation_stream(request: StartRequest):
     )
 
 
-@router.post("/reply", response_model=ReplyResponse, status_code=status.HTTP_200_OK)
-def reply_to_question(request: ReplyRequest):
+def execute_reply_flow(
+    request: ReplyRequest,
+    on_progress: Optional[Callable[[str, Optional[str]], None]] = None,
+) -> ReplyResponse:
     """
-    Submits a user answer to the active clarifying question and resumes the graph for the given thread_id.
+    Executes the reply workflow synchronously, emitting real-time progress notifications
+    when a progress notifier is provided or registered in context.
     """
+    token = set_progress_notifier(on_progress)
     try:
         config = {"configurable": {"thread_id": request.thread_id}}
         snapshot = graph.get_state(config)
@@ -538,8 +542,7 @@ def reply_to_question(request: ReplyRequest):
                     logger.error(f"Failed to update Conversation status to failed in /reply: {fail_err}")
             raise
 
-
-        # 7. Handle next interrupt or completion and update Conversation record
+        # 6. Handle next interrupt or completion and update Conversation record
         if isinstance(output, dict) and "__interrupt__" in output:
             interrupt_payload = output["__interrupt__"][0].value
             question_text = interrupt_payload.get("question") if isinstance(interrupt_payload, dict) else str(interrupt_payload)
@@ -608,11 +611,100 @@ def reply_to_question(request: ReplyRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in POST /reply: {e}")
+        logger.error(f"Error in execute_reply_flow: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while processing the reply."
         )
+    finally:
+        reset_progress_notifier(token)
+
+
+async def stream_reply_conversation(request: ReplyRequest):
+    """
+    Asynchronous SSE generator streaming dynamic progress events during conversation reply.
+    Yields 'progress', 'complete', and 'error' SSE frames.
+    """
+    loop = asyncio.get_running_loop()
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    def on_progress(message: str, detail: Optional[str] = None):
+        payload = {"type": "progress", "message": message, "detail": detail}
+        loop.call_soon_threadsafe(event_queue.put_nowait, payload)
+
+    def worker():
+        try:
+            resp = execute_reply_flow(request, on_progress=on_progress)
+            loop.call_soon_threadsafe(
+                event_queue.put_nowait,
+                {"type": "complete", "data": resp.model_dump()},
+            )
+        except HTTPException as http_exc:
+            loop.call_soon_threadsafe(
+                event_queue.put_nowait,
+                {"type": "error", "error": http_exc.detail},
+            )
+        except Exception as exc:
+            logger.error(f"Error in stream_reply_conversation worker: {exc}")
+            loop.call_soon_threadsafe(
+                event_queue.put_nowait,
+                {"type": "error", "error": "An unexpected error occurred while processing the reply."},
+            )
+        finally:
+            loop.call_soon_threadsafe(event_queue.put_nowait, None)
+
+    worker_task = asyncio.create_task(asyncio.to_thread(worker))
+
+    try:
+        while True:
+            item = await event_queue.get()
+            if item is None:
+                break
+            if item["type"] == "progress":
+                yield f"event: progress\ndata: {json.dumps(item)}\n\n"
+            elif item["type"] == "complete":
+                yield f"event: complete\ndata: {json.dumps(item['data'])}\n\n"
+            elif item["type"] == "error":
+                yield f"event: error\ndata: {json.dumps({'error': item['error']})}\n\n"
+    finally:
+        await worker_task
+
+
+@router.post("/reply", response_model=ReplyResponse, status_code=status.HTTP_200_OK)
+def reply_to_question(request: ReplyRequest, http_request: Request):
+    """
+    Submits a user answer to the active clarifying question and resumes the graph for the given thread_id.
+    Streams SSE updates when requested via Accept: text/event-stream or ?stream=true.
+    """
+    accept_header = http_request.headers.get("accept", "")
+    stream_param = http_request.query_params.get("stream", "").lower()
+
+    if "text/event-stream" in accept_header or stream_param in ("true", "1"):
+        return StreamingResponse(
+            stream_reply_conversation(request),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    return execute_reply_flow(request)
+
+
+@router.post("/reply/stream")
+def reply_conversation_stream(request: ReplyRequest):
+    """Explicit SSE streaming endpoint for conversation reply."""
+    return StreamingResponse(
+        stream_reply_conversation(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/strategy", response_model=StrategyResponse, status_code=status.HTTP_200_OK)
