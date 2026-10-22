@@ -19,6 +19,9 @@ from backend.app.services.tavily_research_service import (
     classify_competitor_response,
     update_state_competitors as tavily_update_state_competitors,
 )
+from backend.app.services.competitor_research_manager import (
+    maybe_trigger_background_competitor_research,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +255,9 @@ def process_answer_for_requirement(state: MarketingAgentState, user_answer: str)
                                 inc_req.status = RequirementStatus.KNOWN
                                 inc_req.value = str(inc_val).strip()
 
+        # Trigger background competitor research immediately if applicable
+        maybe_trigger_background_competitor_research(state, user_answer=user_answer, active_req_id=active_req_id)
+
         # 3. Record single QATurn in qa_history for the actual turn
         qa_turn = QATurn(
             question=question_text or "",
@@ -474,6 +480,9 @@ def process_answer_and_plan_next(state: MarketingAgentState, user_answer: str) -
                                     update_state_competitors(state, inc_comps)
                                 inc_req.status = RequirementStatus.KNOWN
                                 inc_req.value = str(inc_val).strip()
+
+        # Trigger background competitor research immediately if applicable
+        maybe_trigger_background_competitor_research(state, user_answer=user_answer, active_req_id=active_req_id)
 
         # Record exactly ONE QATurn for the actual answered turn
         qa_turn = QATurn(

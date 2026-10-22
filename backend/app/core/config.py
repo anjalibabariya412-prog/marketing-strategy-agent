@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     llm_cached_input_price_per_1m: Optional[Decimal] = Decimal("0.01")
     llm_cache_write_price_per_1m: Optional[Decimal] = Decimal("0.125")
     llm_output_price_per_1m: Optional[Decimal] = Decimal("0.50")
+    # Competitor research background execution settings
+    competitor_research_timeout: float = 30.0
+    competitor_research_max_workers: int = 5
+
+
 
     # This tells Pydantic Settings where to find the .env file
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

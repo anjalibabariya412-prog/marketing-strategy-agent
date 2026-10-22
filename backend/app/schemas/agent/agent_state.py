@@ -76,6 +76,14 @@ class MarketingAgentState(BaseModel):
         default=None,
         description="Structured competitor web research retrieved via Tavily and analyzed with LLM."
     )
+    competitor_research_status: str = Field(
+        default="not_started",
+        description="Status of competitor research workflow ('not_started', 'running', 'completed', 'failed')."
+    )
+    competitor_research_job_id: Optional[str] = Field(
+        default=None,
+        description="Identifier of the active or completed background research job."
+    )
     final_strategy: Optional[MarketingStrategy] = Field(
         default=None,
         description="The final generated marketing strategy, populated once sufficient information has been collected and generate_strategy() has run."

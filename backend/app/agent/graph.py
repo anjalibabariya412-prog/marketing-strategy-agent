@@ -13,6 +13,10 @@ from backend.app.agent.answer_processing import process_answer_for_requirement, 
 from backend.app.agent.sufficiency_check import is_sufficient
 from backend.app.agent.strategy_generation import generate_strategy
 from backend.app.services.tavily_research_service import conduct_competitor_research
+from backend.app.services.competitor_research_manager import (
+    competitor_research_manager,
+    maybe_trigger_background_competitor_research,
+)
 from backend.app.core.progress_notifier import emit_progress
 
 logger = logging.getLogger(__name__)
@@ -123,6 +127,9 @@ def ask_node(state: MarketingAgentState) -> MarketingAgentState:
             logger.info(f"Graph Node [ask]: Resumed with answer -> Calling process_answer_for_requirement()")
             process_answer_for_requirement(state, str(user_answer))
 
+        # Check and merge completed background competitor research if available
+        competitor_research_manager.check_and_merge_completed(state)
+
         # Ensure next question is populated as pending if answer processing did not populate pending fields and state is not yet sufficient
         if not state.pending_question or not state.pending_requirement_id:
             if not is_sufficient(state):
@@ -147,19 +154,16 @@ def competitor_research_node(state: MarketingAgentState) -> MarketingAgentState:
     """
     Graph Node: Researches identifiable competitors using Tavily and analyzes
     findings using the centralized LLM service.
-    Runs when competitors are present and unresearched.
-    Safe and non-blocking: errors or empty results never halt the workflow.
+    Synchronizes with background research if already running or completed.
+    Runs safe fallback if research was not previously started.
     """
     state.resolve_strategy_request_id()
-    logger.info("Graph Node [competitor_research]: Checking for unresearched competitors")
+    logger.info("Graph Node [competitor_research]: Synchronizing competitor research")
     try:
-        latest_answer = None
-        if state.qa_history:
-            for turn in reversed(state.qa_history):
-                if turn.requirement_id in ("competitive_landscape", "competitors") or "competitor" in str(turn.requirement_id or "").lower():
-                    latest_answer = turn.answer
-                    break
-        conduct_competitor_research(state, latest_user_answer=latest_answer)
+        state = competitor_research_manager.sync_and_merge(
+            state=state,
+            timeout=settings.competitor_research_timeout,
+        )
     except Exception as e:
         logger.error(f"competitor_research_node encountered unexpected error: {e}")
     return state
@@ -176,12 +180,14 @@ def generate_node(state: MarketingAgentState) -> MarketingAgentState:
     state.pending_question = None
     state.pending_requirement_id = None
 
-    # Ensure competitor research has run prior to strategy generation (safeguard)
-    if not state.competitor_research:
-        try:
-            conduct_competitor_research(state)
-        except Exception as e:
-            logger.error(f"Pre-generation competitor research failed: {e}")
+    # Synchronize background competitor research before strategy generation (safeguard & final sync point)
+    try:
+        state = competitor_research_manager.sync_and_merge(
+            state=state,
+            timeout=settings.competitor_research_timeout,
+        )
+    except Exception as e:
+        logger.error(f"Pre-generation competitor research synchronization failed: {e}")
 
     strategy = generate_strategy(state)
     state.final_strategy = strategy
